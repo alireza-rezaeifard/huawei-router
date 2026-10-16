@@ -28,7 +28,16 @@ from huawei_tower.modem.errors import ModemHTTPError, UnsafeOperationError
 
 
 class RecordingResponse:
-    """Synthetic streaming response with request-free byte sequences."""
+    """Synthetic streaming response faithful to the requests public contract.
+
+    Implements the same ``content``/``_content``/``_content_consumed``
+    caching protocol as ``requests.models.Response`` (pinned version
+    contract, verified against requests 2.34.2:
+    ``_content is False`` == not read yet; ``_content_consumed`` with an
+    unread ``_content`` raises RuntimeError like requests does), so tests
+    exercise what a REAL response would do — including proving that the
+    client's cache publication prevents any re-read from the closed stream.
+    """
 
     def __init__(self=None, status_code=200, body=b"", *, fail_after=None):
         self.status_code = status_code
@@ -37,9 +46,14 @@ class RecordingResponse:
         self.headers = {"Set-Cookie": "SessionID=SYNTHETIC-FAKE-VALUE"}
         self.closed = False
         self.iterated = False
+        self.iteration_count = 0
+        self.encoding = None
+        self._content = False
+        self._content_consumed = False
 
     def iter_content(self, chunk_size: int):
         self.iterated = True
+        self.iteration_count += 1
         if self._fail_after is not None:
             yield self._body[: self._fail_after]
             raise requests.exceptions.ChunkedEncodingError("simulated drop")
@@ -50,8 +64,21 @@ class RecordingResponse:
         self.closed = True
 
     @property
+    def content(self) -> bytes:
+        if self._content is False:
+            if self._content_consumed:
+                raise RuntimeError(
+                    "The content for this response was already consumed"
+                )
+            self._content = b"".join(self.iter_content(65536)) or b""
+        self._content_consumed = True
+        return self._content
+
+    @property
     def text(self) -> str:
-        return self._body.decode("utf-8", errors="replace")
+        if not self.content:
+            return ""
+        return self.content.decode(self.encoding or "utf-8", errors="replace")
 
 
 class RecordingSession:
@@ -163,7 +190,26 @@ def test_normal_size_response_materialized_as_before():
     client = _client(RecordingSession(response))
     result = client.get("/api/device/basic_information")
     assert result.status_code == 200
-    assert result._content == body
+    # PUBLIC requests API: content/text must come from the cache published
+    # by the client; neither access may re-read the closed stream.
+    consumed_before = response.iteration_count
+    assert result.content == body
+    assert result.text == body.decode("utf-8")
+    assert response.iteration_count == consumed_before, (
+        "public content/text access must NOT re-read the closed stream"
+    )
+    assert response.closed
+    assert response.iterated, "the bounded reader consumed the stream itself"
+
+
+def test_empty_response_body_is_well_defined():
+    """An HTTP 200 with a zero-length body yields b'' and an empty string."""
+    response = RecordingResponse(200, b"")
+    client = _client(RecordingSession(response))
+    result = client.get("/api/device/basic_information")
+    assert result.status_code == 200
+    assert result.content == b""
+    assert result.text == ""
     assert response.closed
 
 
@@ -211,6 +257,30 @@ def test_interrupted_stream_raises_and_closes():
     with pytest.raises(ModemHTTPError, match="interrupted"):
         client.get("/api/device/basic_information")
     assert response.closed
+
+
+def test_only_requests_exceptions_translated_and_connection_still_released():
+    """Documented policy: a NON-requests exception during streaming is a
+    programming/middleware defect and must propagate UNCHANGED — it is never
+    disguised as ModemHTTPError — but the response connection is still
+    released unconditionally."""
+    class BuggyMiddlewareResponse(RecordingResponse):
+        def iter_content(self, chunk_size: int):
+            self.iterated = True
+            yield b"F" * 16
+            raise ValueError("defective middleware, not a transport failure")
+
+    response = BuggyMiddlewareResponse(200, b"F" * 256)
+    client = _client(RecordingSession(response))
+    with pytest.raises(ValueError, match="defective middleware"):
+        client.get("/api/device/basic_information")
+    assert response.closed, "even non-requests exceptions must release the connection"
+
+    # Contrast: a requests-family exception IS translated.
+    dropped = RecordingResponse(200, b"E" * 128, fail_after=64)
+    client2 = _client(RecordingSession(dropped))
+    with pytest.raises(ModemHTTPError, match="interrupted"):
+        client2.get("/api/device/basic_information")
 
 
 # --------------------------------------------------------- G-5 error hygiene
@@ -396,14 +466,13 @@ def _downloader(dest: Path):
 
 
 def test_sequential_same_destination_publication_never_clobbers(dest: Path):
+    from huawei_tower.modem.jsdownloader import AssetDownloadError
+
     first = _downloader(dest).fetch("/js/login.js")
     assert first is not None
     before = first.read_bytes()
     before_mtime = first.stat().st_mtime_ns
-    with pytest.raises(
-        Exception,
-        match="already exists|Refusing non-canonical|not on the approved",
-    ):
+    with pytest.raises(AssetDownloadError, match="already exists"):
         _downloader(dest).fetch("/js/login.js")
     assert first.read_bytes() == before
     assert first.stat().st_mtime_ns == before_mtime
@@ -412,19 +481,22 @@ def test_sequential_same_destination_publication_never_clobbers(dest: Path):
 
 def test_error_download_paths_leave_no_part_files(dest: Path):
     from huawei_tower.modem.errors import ModemHTTPError
-    from huawei_tower.modem.jsdownloader import JSAssetDownloader
+    from huawei_tower.modem.jsdownloader import (
+        JSAssetDownloader,
+        AssetDownloadError,
+    )
 
     # XML error body: refused as non-asset, nothing stored.
     session = _DLStubSession(_DLStubResponse(200, _DL_ERROR_XML))
     dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
-    with pytest.raises(Exception):
+    with pytest.raises(AssetDownloadError, match="XML response"):
         dl.fetch("/js/login.js")
     assert [p.name for p in dest.glob("*.part")] == []
 
     # Oversize: refused mid-stream, nothing stored.
     session = _DLStubSession(_DLStubResponse(200, b"x" * 4096))
     dl = JSAssetDownloader("https://192.168.70.1", dest, session=session, max_asset_bytes=128)
-    with pytest.raises(Exception):
+    with pytest.raises(AssetDownloadError, match="size limit"):
         dl.fetch("/js/login.js")
     assert [p.name for p in dest.glob("*.part")] == []
 
@@ -434,17 +506,17 @@ def test_error_download_paths_leave_no_part_files(dest: Path):
         dest,
         session=_DLStubSession(_DLStubResponse(500, b"// never stored")),
     )
-    with pytest.raises(ModemHTTPError):
+    with pytest.raises(ModemHTTPError, match="HTTP"):
         dl.fetch("/js/login.js")
     assert [p.name for p in dest.glob("*.part")] == []
 
-    # Unapproved path: rejected before any I/O, nothing stored.
+    # Unpublished.approved path: rejected before any I/O, nothing stored.
     dl2 = JSAssetDownloader(
         "https://192.168.70.1",
         dest,
         session=_DLStubSession(_DLStubResponse(200, b"// ok")),
     )
-    with pytest.raises(Exception):
+    with pytest.raises(AssetDownloadError, match="not on the approved asset list"):
         dl2.fetch("/js/not-approved.js")
     assert [p.name for p in dest.glob("*.part")] == []
     assert not dest.joinpath("js_login.js").exists()

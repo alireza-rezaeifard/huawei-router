@@ -277,6 +277,14 @@ class ReadOnlyModemClient:
             allow_redirects=False,
             stream=True,
         )
+        # Stream-exception policy (deliberate, tested): ONLY subclasses of
+        # ``requests.exceptions.RequestException`` (the umbrella for
+        # connection drops, chunked-encoding violations, timeouts raised
+        # through urllib3, ...) are translated into ``ModemHTTPError``.
+        # Any other exception raised during streaming is a programming or
+        # middleware defect and deliberately propagates UNCHANGED so it is
+        # never disguised as a modem/HTTP condition. In every case the
+        # response connection is still released (the ``finally`` below).
         total = 0
         chunks: list[bytes] = []
         try:
@@ -306,10 +314,19 @@ class ReadOnlyModemClient:
             close = getattr(response, "close", None)
             if callable(close):
                 close()
-        # Materialize the (already-received) body so the historical eager
-        # return contract holds: callers read .text/.content synchronously
-        # exactly as before; only oversized/interrupted transfers differ.
-        response._content = b"".join(chunks)  # noqa: SLF001 - requests content cache
+        # Publish the (already-received) body into the requests cache STATE
+        # exactly as requests itself does after a full read: with the pinned
+        # requests contract (>= 2.25, verified with 2.34.2 in
+        # ``requests.models.Response``), a False ``_content`` means "not
+        # read yet" and ``_content_consumed`` guards against
+        # double-consumption. Setting BOTH replicates requests' own
+        # post-read state, so the PUBLIC bytes/unicode accessors return the
+        # cached bytes WITHOUT any re-read from the now-closed connection,
+        # and every later access is synchronous, like the historical eager
+        # contract.
+        body = b"".join(chunks)
+        response._content = body  # noqa: SLF001 - exact requests cache pin
+        response._content_consumed = True  # noqa: SLF001 - ditto
         return response
 
     def close(self) -> None:

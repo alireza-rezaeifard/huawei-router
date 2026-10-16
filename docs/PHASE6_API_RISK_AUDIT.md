@@ -297,29 +297,55 @@ per-interpreter, children escape, `socketpair` unpatched — `conftest.py:31-35`
 
 ### Prioritized security/test gaps (no modem contact needed to close)
 
+(Phase 7 resolution status in brackets — see docs/PHASE7_OFFLINE_HARDENING.md)
+
 1. **G-1** (low) — add `connect`/`trace` to `_WRITE_METHODS` + explicit
    regression test (clearer failure surface; currently safe via bare
-   AttributeError).
+   AttributeError). [**CLOSED in Phase 7** — `_WRITE_METHODS` extended;
+   `tests/test_phase7_hardening.py::test_all_nine_write_and_unknown_verbs_blocked_fail_closed`]
 2. **G-2** (medium) — dedicated test that paths containing `?`/`#` never
    match the allowlist (exact-match makes them rejected today, but not
-   asserted explicitly).
+   asserted explicitly). [**CLOSED in Phase 7** —
+   `tests/test_phase7_hardening.py::test_query_strings_and_fragments_never_match_the_allowlist`]
 3. **G-3** (medium) — assert the chosen `timeout` forwarded per request in
    both `api.py:224` and `jsdownloader.py:256` (mock capture).
+   [**CLOSED for the API client in Phase 7** —
+   `tests/test_phase7_hardening.py::test_default_timeout_is_forwarded_per_request`
+   / `::test_custom_timeout_is_forwarded_per_request`; the downloader
+   timeout was already asserted via kwargs in `test_jsdownloader.py`
+   (`kwargs["timeout"]` captured at `:173`, `:224-233` context)]
 4. **G-4** (medium) — response-size ceiling for `ReadOnlyModemClient.get`
    analog of downloader cap; plus test (fix REQUIRED if client ever gains a
-   bulky read).
+   bulky read). [**CLOSED in Phase 7** — `max_response_bytes` streaming
+   limit (default 8 MiB, enforced mid-read, connection released); tests in
+   `tests/test_phase7_hardening.py`]
 5. **G-5** (medium) — test that `ModemHTTPError`/`UnsafeOperationError`
    message text contains no response body/headers (currently true by
-   construction: only path+status; keep it enforced).
+   construction: only path+status; keep it enforced). [**CLOSED in
+   Phase 7** — non-200 bodies are never even read + message-hygiene tests in
+   `tests/test_phase7_hardening.py`]
 6. **G-6** (medium) — source-scan test: no logging of
    `response.text/.content/.headers/.cookies` anywhere in client code
    (protects the `SesTokInfo` "never logged" policy `api.py:60-65`).
+   [**CLOSED in Phase 7** — source-scan tests in
+   `tests/test_phase7_hardening.py`]
 7. **G-7** (high-value, future) — an offline mock proving SCRAM round-trip
    consistency against a fixture challenge/response pair (algorithm is
-   correct offline; live semantics remain a live-phase blocker).
+   correct offline; live semantics remain a live-phase blocker). [
+   **OPEN — deferred; requires a live verification plan anyway**]
 8. **G-8** (low) — downloader `_SessionLike` Protocol lacks
    `close()`; internal sessions close fine (`jsdownloader.py:289-291`)
-   but a Protocol-level test for close-on-error is a hardening nicety.
+   but a Protocol-level test for close-on-error is a hardening nicety. [
+   **OPEN — cosmetic**]
+
+**Phase 7 additional note:** `docs/PHASE6_API_RISK_AUDIT.md` §3.1 table
+classified `/api/webserver/SesTokInfo` and `/api/webserver/token` as
+`sensitive_read_candidate`. Phase 7 implemented that review outcome:
+**both moved out of the executable ×true allowlist** into
+`GATED_GET_ENDPOINTS` with classification `state_allocating`
+(`api.py`); the client then refuses them like every other gated entry.
+This matches the audit conclusion ("HTTP GET does not imply
+side-effect-free"), ahead of task 4 of the Phase 7 brief.
 
 ---
 
