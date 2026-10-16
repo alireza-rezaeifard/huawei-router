@@ -365,9 +365,12 @@ modem (it requires an approved live phase per §9). Client-side SCRAM remains
 statically/offline verified; actual modem compatibility is proven only by the
 future approved live round-trip, and endpoint side effects stay unverified.
 
-### 10a. Phase 3.2 — final offline audit notes (verified facts)
+### 10a. Phase 3.2/3.3 — final offline audit notes (verified facts)
 
 Phase 3.2 was an offline-only audit; no request was sent to the modem.
+Phase 3.3 (guard tightening, `gethostbyname_ex`/`getnameinfo` added, dead
+constant removed) was likewise offline-only. No authentication, asset
+download, scan, or configuration change was performed in either audit.
 
 **What `AuthenticatedDownloadAuthorization` is, and is not:**
 
@@ -377,7 +380,8 @@ Phase 3.2 was an offline-only audit; no request was sent to the modem.
   use fails before network I/O; the downloader cannot create one implicitly.
 - It is NOT proof that a human approved anything. The dataclass is directly
   constructible by any caller; `operator` and `reason` are free-text
-  metadata, not credentials, and are not verified against any approver
+  metadata, not credentials, not cryptographic proof of approval, and are
+  not verified against any approver
   registry (none exists). A malicious or careless caller can fabricate one.
   The real authorization control remains the review process around who runs
   what code — this object only makes silence/unaccounted use impossible.
@@ -389,7 +393,9 @@ Phase 3.2 was an offline-only audit; no request was sent to the modem.
 
 - The only accepted settings are `True` and a non-empty path to an existing
   CA bundle **file**; everything else (`False`, `None`, `1`, `0`, `""`,
-  wrong types, missing files) raises `ValueError` before any I/O.
+  wrong types, missing files) raises `ValueError` before any I/O. The policy
+  is unchanged by Phases 3.2/3.3; certificate verification cannot be
+  disabled.
 - Limitation: the resolver checks that the CA bundle exists as a file; it
   does **not** parse the file to confirm it contains valid certificates. A
   syntactically present but certificate-free file would be accepted and
@@ -401,15 +407,20 @@ Phase 3.2 was an offline-only audit; no request was sent to the modem.
 **Offline test guard (conftest), audit-confirmed:**
 
 - The autouse fixture denies `socket.socket`, `socket.create_connection`,
-  `socket.getaddrinfo`, and `socket.gethostbyname*` for every test that
-  lacks the `network` marker; DNS denial (added in Phase 3.2, regression-
-  tested) closes the resolution side-channel of every HTTP stack.
-- Known limits, stated rather than hidden: child processes are outside the
-  patch scope; `socket.socketpair` (loopback-only) is not intercepted; and
-  the `network` marker is the sole documented opt-out — no test uses it, so
-  ordinary tests cannot opt out accidentally. Complete OS-level isolation is
-  not claimed; the guard is a fail-fast construction-time tripwire proven by
-  the suite.
+  and the full DNS/name-resolution family — `socket.getaddrinfo`,
+  `socket.gethostbyname`, `socket.gethostbyname_ex`, `socket.gethostbyaddr`,
+  `socket.getnameinfo` — for every test that lacks the `network` marker;
+  the resolver family denial (added in Phase 3.2, completed in Phase 3.3,
+  regression-tested) closes the resolution side-channel of every HTTP
+  stack: name resolution and reverse/forward lookups all fail fast.
+  The `network` marker exists as an explicit opt-out and **no current test
+  uses it**, so ordinary tests cannot opt out accidentally.
+- The fixture is a **test-level fail-fast guard, not OS-level network
+  isolation**: the monkeypatch acts within the test interpreter only.
+  Child processes and unpatched networking mechanisms (e.g.
+  `socket.socketpair`, loopback-only) may be outside its scope. No claim is
+  made that every possible networking mechanism is blocked; the guard is a
+  proven construction-time tripwire, nothing more.
 
 **`tools/probe.py` (audit-confirmed read-only):**
 

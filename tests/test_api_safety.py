@@ -207,9 +207,16 @@ def test_socket_blocking_is_enforced_in_the_test_suite():
 
 def test_dns_resolution_is_also_denied_in_the_test_suite():
     # DNS is real network I/O; the offline guard must deny it too.
+    # All arguments are synthetic placeholders; the deny raises before any I/O.
     import socket
 
     with pytest.raises(RuntimeError):
         socket.getaddrinfo("192.168.70.1", 443)
     with pytest.raises(RuntimeError):
         socket.gethostbyname("192.168.70.1")
+    with pytest.raises(RuntimeError):
+        socket.gethostbyname_ex("192.168.70.1")
+    with pytest.raises(RuntimeError):
+        socket.gethostbyaddr("127.0.0.1")
+    with pytest.raises(RuntimeError):
+        socket.getnameinfo(("127.0.0.1", 80))
