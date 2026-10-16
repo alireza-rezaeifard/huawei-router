@@ -203,3 +203,13 @@ def test_socket_blocking_is_enforced_in_the_test_suite():
 
     with pytest.raises(RuntimeError):
         socket.socket()
+
+
+def test_dns_resolution_is_also_denied_in_the_test_suite():
+    # DNS is real network I/O; the offline guard must deny it too.
+    import socket
+
+    with pytest.raises(RuntimeError):
+        socket.getaddrinfo("192.168.70.1", 443)
+    with pytest.raises(RuntimeError):
+        socket.gethostbyname("192.168.70.1")

@@ -364,3 +364,74 @@ plus that the authorization path has never been exercised against the real
 modem (it requires an approved live phase per §9). Client-side SCRAM remains
 statically/offline verified; actual modem compatibility is proven only by the
 future approved live round-trip, and endpoint side effects stay unverified.
+
+### 10a. Phase 3.2 — final offline audit notes (verified facts)
+
+Phase 3.2 was an offline-only audit; no request was sent to the modem.
+
+**What `AuthenticatedDownloadAuthorization` is, and is not:**
+
+- It IS an accidental-use guard: a deliberately constructed, path-scoped,
+  auditable consent object that makes an authenticated download impossible
+  without a visible, justified decision in code. Every invalid or mismatched
+  use fails before network I/O; the downloader cannot create one implicitly.
+- It is NOT proof that a human approved anything. The dataclass is directly
+  constructible by any caller; `operator` and `reason` are free-text
+  metadata, not credentials, and are not verified against any approver
+  registry (none exists). A malicious or careless caller can fabricate one.
+  The real authorization control remains the review process around who runs
+  what code — this object only makes silence/unaccounted use impossible.
+- No environment variable, CLI flag, global mutable Boolean, or session
+  cookie can enable authenticated downloads; the only path is supplying a
+  correctly scoped object per `fetch()` call.
+
+**TLS policy precision (audit-confirmed):**
+
+- The only accepted settings are `True` and a non-empty path to an existing
+  CA bundle **file**; everything else (`False`, `None`, `1`, `0`, `""`,
+  wrong types, missing files) raises `ValueError` before any I/O.
+- Limitation: the resolver checks that the CA bundle exists as a file; it
+  does **not** parse the file to confirm it contains valid certificates. A
+  syntactically present but certificate-free file would be accepted and
+  simply fail TLS handshakes *securely* (verification stays on), never
+  bypassing it.
+- No proxy/trust-env tampering, adapter `mount`, `CERT_NONE`, warning
+  suppression, or HTTP-downgrade path exists in the codebase.
+
+**Offline test guard (conftest), audit-confirmed:**
+
+- The autouse fixture denies `socket.socket`, `socket.create_connection`,
+  `socket.getaddrinfo`, and `socket.gethostbyname*` for every test that
+  lacks the `network` marker; DNS denial (added in Phase 3.2, regression-
+  tested) closes the resolution side-channel of every HTTP stack.
+- Known limits, stated rather than hidden: child processes are outside the
+  patch scope; `socket.socketpair` (loopback-only) is not intercepted; and
+  the `network` marker is the sole documented opt-out — no test uses it, so
+  ordinary tests cannot opt out accidentally. Complete OS-level isolation is
+  not claimed; the guard is a fail-fast construction-time tripwire proven by
+  the suite.
+
+**`tools/probe.py` (audit-confirmed read-only):**
+
+- CLI surface is `--base-url`, `--endpoint` (repeatable GET path), and
+  `--ca-bundle`; all traffic flows through `ReadOnlyModemClient.get`, which
+  enforces HTTPS-only, exact-path allowlisting, GET-only, TLS-verified,
+  redirect-disabled requests. Arbitrary methods or URLs are not constructible.
+- `--ca-bundle ""` falls through to `True` (stricter, not weaker); missing
+  CA files fail at client construction before any I/O.
+- Output is stdout JSON of allowlist-approved endpoints only, with
+  `redact_secrets` applied to any non-XML fallback body; nothing is written
+  to disk, and no authentication routine exists in any CLI path
+  (`prompt_password` is defined in `security.py` but currently unused).
+
+**Best Pair scan / locking boundary (audit-confirmed):**
+
+- Every dangerous name (`best-signal-position`,
+  `external-best-signal-position`, `onekey_diag`, `handle-cell`, `celllock`,
+  `lock-freq`, `net-mode`, `register`, `reconnect`, `dial`, `plmn-list`,
+  `challenge_login`, `authentication_login`) in tracked `.py` files appears
+  only in: the `FORBIDDEN_PATHS` deny list in `api.py`, denied-endpoint
+  assertions in tests, `docs/*.md`, `README.md`, or pure offline SCRAM
+  constants in `scram.py` (no network code, imported by no executable path).
+  There is no code path — client, CLI, or downloader — that can transmit any
+  of these endpoints or invoke a write HTTP method.
