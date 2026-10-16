@@ -189,14 +189,17 @@ class ReadOnlyModemClient:
         # is rejected here, never silently forwarded to the session.
         self.verify_tls = resolve_verify_tls(verify_tls)
         self.timeout = timeout
-        self._session = session or requests.Session()
         if session is None:
-            # Internally created session: never inherit environment proxies
-            # or .netrc credentials for the fixed modem origin (they could
-            # redirect or decorate requests unexpectedly). Caller-injected
-            # sessions keep their explicit configuration. TLS verification
-            # is unaffected — ``verify`` is passed per request.
+            # Internally created session only: never inherit environment
+            # proxies or .netrc credentials for the fixed modem origin (they
+            # could redirect or decorate requests unexpectedly). TLS
+            # verification is unaffected — ``verify`` is passed per request.
+            self._session = requests.Session()
             self._session.trust_env = False
+        else:
+            # Caller-injected session is kept exactly as provided — including
+            # falsey objects — and its configuration is never modified.
+            self._session = session
         self._session.headers.update({"Accept": "*/*", "User-Agent": "H158-381-BestPair/0.3 read-only"})
 
     def _classify(self, path: str) -> str | None:

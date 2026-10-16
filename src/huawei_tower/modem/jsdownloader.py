@@ -41,6 +41,7 @@ Safety properties implemented here:
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Protocol
@@ -292,41 +293,49 @@ class JSAssetDownloader:
     def _publish(self, path: str, dest: Path, body: bytes) -> None:
         """Atomically publish ``body`` at ``dest`` — never overwriting anything.
 
-        Strategy: write a sibling ``*.tmp`` file, then hard-link it into place.
-        ``os.link`` fails atomically if ``dest`` exists (on both Windows/NTFS
-        and POSIX), so a destination created even nanoseconds earlier — or by
-        a concurrent process — is preserved byte-for-byte. There is no
-        rename/replace step and no silent clobber on any platform: on
-        filesystems without hard-link support publication is REFUSED
-        (fail-closed) instead of falling back to an overwriting rename.
-        Temporary files are always cleaned up on success and failure.
+        Temporary file: created with :func:`tempfile.mkstemp` in the
+        destination's own directory using a UNIQUE random name and exclusive
+        creation (``O_CREAT|O_EXCL``), so concurrent runs can never collide
+        with, overwrite, or delete each other's temporary files. Only the
+        temporary file created by THIS call is ever cleaned up.
+
+        Publication: ``os.link(tmp, dest)`` fails atomically if ``dest``
+        exists (on both Windows/NTFS and POSIX), so a destination created
+        even nanoseconds earlier — or by a concurrent process — is preserved
+        byte-for-byte. There is no rename/replace step and no silent clobber
+        on any platform: on filesystems without hard-link support publication
+        is REFUSED (fail-closed) instead of falling back to an overwriting
+        rename. On success the temp file is unlinked (the hard link keeps
+        the published inode alive); on every failure path the temp file is
+        unlinked and ``dest`` is never touched.
         """
         if dest.exists():
             raise AssetDownloadError(
                 f"Destination for {path} already exists ({dest.name}); the "
                 "previous file is preserved and nothing was overwritten."
             )
-        tmp = dest.with_suffix(dest.suffix + ".tmp")
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(dest.parent), prefix=dest.name + ".", suffix=".part"
+        )
+        tmp = Path(tmp_name)
         try:
-            tmp.write_bytes(body)
-        except Exception:
-            tmp.unlink(missing_ok=True)
-            raise
-        try:
-            os.link(tmp, dest)
-        except FileExistsError as exc:
-            # Destination appeared concurrently: preserve it byte-for-byte.
-            raise AssetDownloadError(
-                f"Destination for {path} appeared during publication; the "
-                "concurrently created file was preserved, nothing overwritten."
-            ) from exc
-        except OSError as exc:
-            # No hard-link support here (e.g. exFAT/network share): fail closed
-            # rather than risk a clobbering rename fallback.
-            raise AssetDownloadError(
-                f"Filesystem does not support atomic no-clobber publication "
-                f"for {dest.parent}; refusing to store ({exc.errno})."
-            ) from exc
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(body)
+            try:
+                os.link(tmp, dest)
+            except FileExistsError as exc:
+                # Destination appeared concurrently: preserve it byte-for-byte.
+                raise AssetDownloadError(
+                    f"Destination for {path} appeared during publication; the "
+                    "concurrently created file was preserved, nothing overwritten."
+                ) from exc
+            except OSError as exc:
+                # No hard-link support here (e.g. exFAT/network share): fail
+                # closed rather than risk a clobbering rename fallback.
+                raise AssetDownloadError(
+                    f"Filesystem does not support atomic no-clobber publication "
+                    f"for {dest.parent}; refusing to store ({exc.errno})."
+                ) from exc
         finally:
             tmp.unlink(missing_ok=True)
 

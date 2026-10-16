@@ -199,6 +199,19 @@ class FakeSession:
         pass
 
 
+class FalseySession(FakeSession):
+    """Injected session with a false ``__bool__`` — must never be replaced."""
+
+    def __bool__(self) -> bool:
+        return False
+
+
+def test_falsey_injected_session_is_not_replaced():
+    falsey = FalseySession()
+    client = ReadOnlyModemClient(session=falsey)
+    assert client._session is falsey
+
+
 def test_approved_endpoint_calls_get_only_with_redirects_disabled():
     session = FakeSession()
     client = ReadOnlyModemClient(session=session)

@@ -40,6 +40,13 @@ class StubSession:
         pass
 
 
+class FalseySession(StubSession):
+    """An injected session whose ``__bool__`` is False — must be kept as-is."""
+
+    def __bool__(self) -> bool:
+        return False
+
+
 @pytest.fixture()
 def dest(tmp_path: Path) -> Path:
     out = tmp_path / "evidence_downloads"
@@ -282,7 +289,7 @@ def test_no_clobber_existing_destination_is_preserved_byte_for_byte(dest):
     with pytest.raises(AssetDownloadError, match="already exists"):
         dl.fetch("/js/login.js")
     assert existing.read_bytes() == b"OLD EVIDENCE BYTES"
-    assert not list(dest.glob("*.tmp"))
+    assert not list(dest.glob("*.part"))
 
 
 def test_tmp_files_are_cleaned_up_on_publication_failure(dest, monkeypatch):
@@ -295,7 +302,7 @@ def test_tmp_files_are_cleaned_up_on_publication_failure(dest, monkeypatch):
     monkeypatch.setattr("os.link", broken_link)
     with pytest.raises(AssetDownloadError, match="no-clobber"):
         dl.fetch("/js/login.js")
-    assert not list(dest.glob("*.tmp"))
+    assert not list(dest.glob("*.part"))
 
 
 def test_concurrent_destination_appearance_is_never_overwritten(dest, monkeypatch):
@@ -310,7 +317,7 @@ def test_concurrent_destination_appearance_is_never_overwritten(dest, monkeypatc
     with pytest.raises(AssetDownloadError, match="appeared during publication"):
         dl.fetch("/js/login.js")
     assert (dest / "js_login.js").read_bytes() == b"CONCURRENT FILE"
-    assert not list(dest.glob("*.tmp"))
+    assert not list(dest.glob("*.part"))
 
 
 def test_publication_succeeds_to_fresh_directory(dest):
@@ -319,10 +326,52 @@ def test_publication_succeeds_to_fresh_directory(dest):
     stored = dl.fetch("/js/login.js")
     assert stored is not None
     assert stored.read_bytes() == b"fresh body"
-    assert not list(dest.glob("*.tmp"))
+    assert not list(dest.glob("*.part"))
+
+
+def test_distinct_runs_use_distinct_temp_files(dest, monkeypatch):
+    """Simulated concurrent/successive runs must never share a temp path."""
+    import os as real_os
+
+    recorded: list[str] = []
+    real_link = real_os.link
+
+    def recording_link(src, dst):
+        recorded.append(str(src))
+        real_link(src, dst)
+
+    monkeypatch.setattr("os.link", recording_link)
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=StubSession())
+    dl.fetch("/js/login.js")
+    dl.fetch("/js/common.js")
+    assert len(recorded) == 2
+    assert recorded[0] != recorded[1], "two runs must not share a temp file"
+
+
+def test_foreign_temp_file_is_never_overwritten_or_deleted(dest):
+    """A temp file owned by another run must survive our publication."""
+    foreign = dest / "js_login.js.owned-by-other-run.part"
+    foreign.write_bytes(b"OTHER RUN TEMP CONTENT")
+    session = StubSession(StubResponse(200, b"my body"))
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
+    stored = dl.fetch("/js/login.js")
+    assert stored is not None and stored.read_bytes() == b"my body"
+    assert foreign.read_bytes() == b"OTHER RUN TEMP CONTENT"
+
+
+def test_falsey_injected_session_is_not_replaced(dest, monkeypatch):
+    """A falsey injected session must never trigger a new internal session."""
+    def forbid(*a, **k):
+        raise AssertionError("internal requests.Session must not be created")
+
+    monkeypatch.setattr("requests.Session", forbid)
+    falsey = FalseySession()
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=falsey)
+    dl.fetch("/js/login.js")  # completes via the injected session alone
 
 
 def test_session_without_get_rejects_early(dest: Path):
     dl = JSAssetDownloader("https://192.168.70.1", dest, dry_run=True)
     # plan() must not require a session
     dl.plan()
+
