@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "huawei-h158381-best-pair"
+version = "0.2.0"
+description = "Local-first, read-only Phase 2 foundation for Huawei H158-381"
+requires-python = ">=3.11"
+dependencies = ["requests>=2.32.0", "cryptography>=42.0.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "pytest-cov>=5.0.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+where = ["src"]
