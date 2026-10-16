@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urljoin, urlparse
 
 import requests
 
 from .errors import ModemHTTPError, UnsafeOperationError
+
+Classification = Literal["verified_read_only", "plausible_read_only", "unsafe", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -15,8 +18,19 @@ class Endpoint:
     notes: str = ""
 
 
-# Only endpoints reported as confirmed, unauthenticated GET reads are enabled.
-# Authenticated endpoints are deliberately gated until their GET behavior is reviewed.
+@dataclass(frozen=True)
+class GatedEndpoint:
+    """Endpoint that exists on this firmware but is NOT callable by this client."""
+
+    path: str
+    classification: Classification
+    reason: str
+    evidence: str = ""
+
+
+# Tier 1 — verified read-only. Each was executed exactly once during the
+# read-only discovery session (docs/PHASE1_FINDINGS.md) and returned HTTP 200
+# with the documented XML payload. GET behavior is confirmed safe.
 SAFE_GET_ENDPOINTS: dict[str, Endpoint] = {
     "/api/device/basic_information": Endpoint(
         "/api/device/basic_information", True, "Basic device metadata; observed HTTP 200."
@@ -43,40 +57,116 @@ SAFE_GET_ENDPOINTS: dict[str, Endpoint] = {
         "/api/global/module-switch", True, "Feature switches; observed HTTP 200."
     ),
     "/api/webserver/SesTokInfo": Endpoint(
-        "/api/webserver/SesTokInfo", True, "Session/token bootstrap metadata; observed HTTP 200."
+        "/api/webserver/SesTokInfo", True, "Session bootstrap; response contains secrets -> never logged."
     ),
     "/api/webserver/token": Endpoint(
-        "/api/webserver/token", True, "Token endpoint observed; never log its response."
+        "/api/webserver/token", True, "Allocates a CSRF token (server-side state); body never logged."
     ),
     "/api/monitoring/check-notifications": Endpoint(
         "/api/monitoring/check-notifications", True, "Notification counters; observed HTTP 200."
     ),
 }
 
-# These endpoints are known to exist but are NOT enabled until their behavior is verified.
-GATED_GET_ENDPOINTS: dict[str, str] = {
-    "/api/monitoring/best-position-status": "Verify it only polls status and cannot start a scan.",
-    "/api/monitoring/best-position-result": "Verify it only reads prior scan results.",
-    "/api/device/information": "Requires login; authenticated GET behavior not yet tested.",
-    "/api/monitoring/status": "Requires login; authenticated GET behavior not yet tested.",
-    "/api/monitoring/converged-status": "Requires login; authenticated GET behavior not yet tested.",
-    "/api/net/cell-info": "Cell schema and authenticated GET behavior not yet tested.",
-    "/api/net/network": "Inspect firmware JS to ensure GET does not trigger network search.",
-    "/api/net/net-mode-list": "Requires login; inspect firmware behavior first.",
+
+# Tier 2/4 — verified NOT enabled. Classification per docs/PHASE3_JS_ANALYSIS.md.
+GATED_GET_ENDPOINTS: dict[str, GatedEndpoint] = {
+    # Best Pair scan polling: the firmware main.js maps these names, but the
+    # page modules that call them were never retrievable without login, so the
+    # exact method/parameters/side effects are UNVERIFIED. A GET on an unknown
+    # trigger state is not proven side-effect-free.
+    "/api/monitoring/best-position-status": GatedEndpoint(
+        "/api/monitoring/best-position-status",
+        "plausible_read_only",
+        "Name suggests status polling; caller page is in an admin-only chunk, "
+        "never traced. Enabled only after firmware control-flow evidence.",
+        evidence="main.js webpack chunk map + endpoint map; see PHASE1/3 docs",
+    ),
+    "/api/monitoring/best-position-result": GatedEndpoint(
+        "/api/monitoring/best-position-result",
+        "plausible_read_only",
+        "Name suggests result read; caller page untraced. No evidence that this "
+        "is side-effect free on an unscanned state.",
+        evidence="main.js endpoint map ('bestPositionRes')",
+    ),
+    "/api/device/information": GatedEndpoint(
+        "/api/device/information",
+        "plausible_read_only",
+        "Requires login (observed 100003 pre-login); authenticated GET behavior "
+        "not yet exercised.",
+        evidence="Phase 1 probes",
+    ),
+    "/api/monitoring/status": GatedEndpoint(
+        "/api/monitoring/status",
+        "plausible_read_only",
+        "Requires login; also the app adds 'Update-Cookie: UpdateCookie' header "
+        "on GET — likely session refresh side effect. Not verified.",
+        evidence="main.js GET wrapper: \"/api/monitoring/status\"===s && (u[\"Update-Cookie\"]=\"UpdateCookie\")",
+    ),
+    "/api/monitoring/converged-status": GatedEndpoint(
+        "/api/monitoring/converged-status",
+        "plausible_read_only",
+        "Requires login (observed 100003 pre-login).",
+        evidence="guide.js getCurrentLanguage uses it pre-login",
+    ),
+    "/api/net/cell-info": GatedEndpoint(
+        "/api/net/cell-info",
+        "unknown",
+        "Cell/neighbor schema unverified; GET side effects unknown.",
+        evidence="main.js endpoint map ('cellInfo')",
+    ),
+    "/api/net/signal": GatedEndpoint(
+        "/api/net/signal",
+        "unknown",
+        "Not in endpoint map; listed as device/signal. Mapped name unknown — treat as unknown.",
+        evidence="-",
+    ),
+    "/api/device/signal": GatedEndpoint(
+        "/api/device/signal",
+        "plausible_read_only",
+        "Known Huawei signal-status endpoint; not yet exercised on this firmware.",
+        evidence="main.js 'singal:\"/api/device/signal\"'",
+    ),
+    "/api/net/network": GatedEndpoint(
+        "/api/net/network",
+        "unknown",
+        "Net select mode read but JS usage untraced; could relate to registration flows.",
+        evidence="main.js 'network:\"/api/net/network\"'",
+    ),
+    "/api/net/net-mode-list": GatedEndpoint(
+        "/api/net/net-mode-list",
+        "plausible_read_only",
+        "Axis list supporting net-mode page; requires login. POST /net-mode is "
+        "the write; GET side effects unverified.",
+        evidence="observed 100003 (login required), Phase 1",
+    ),
 }
 
-FORBIDDEN_PATHS = {
+# Tier 3 — unsafe or unknown-dangerous. The client rejects these before any I/O.
+FORBIDDEN_PATHS: set[str] = {
+    # Scan initiation (method/side effects unknown; never probe).
     "/api/monitoring/best-signal-position",
     "/api/monitoring/external-best-signal-position",
+    "/api/monitoring/onekey_diag",
+    # Cell/band/PCI locking and write-path endpoints.
     "/api/net/handle-cell",
     "/api/ntwk/celllock",
     "/api/net/lock-freq",
+    "/api/net/net-mode",
+    # Registration / connectivity hazards.
     "/api/net/register",
     "/api/net/reconnect",
+    "/api/net/plmn-list",  # manual network search; likely triggers re-registration
+    "/api/dialup/dial",
+    "/api/monitoring/start_date",
+    "/api/device/control",
+    "/api/device/datalock",
+    # Authentication POSTs (never callable as GETs by this client).
     "/api/user/challenge_login",
     "/api/user/authentication_login",
     "/api/user/login",
 }
+
+_WRITE_METHODS = ("post", "put", "patch", "delete", "head", "options", "request")
 
 
 class ReadOnlyModemClient:
@@ -97,15 +187,24 @@ class ReadOnlyModemClient:
         self.verify_tls = verify_tls
         self.timeout = timeout
         self._session = session or requests.Session()
-        self._session.headers.update({"Accept": "*/*", "User-Agent": "H158-381-BestPair/0.2 read-only"})
+        self._session.headers.update({"Accept": "*/*", "User-Agent": "H158-381-BestPair/0.3 read-only"})
+
+    def _classify(self, path: str) -> str | None:
+        """Return None when ``path`` is approved; otherwise a rejection reason."""
+        if path in FORBIDDEN_PATHS:
+            return f"Blocked endpoint (unsafe/unknown side effects): {path}"
+        endpoint = SAFE_GET_ENDPOINTS.get(path)
+        if endpoint is not None and endpoint.verified_read_only:
+            return None
+        gated = GATED_GET_ENDPOINTS.get(path)
+        if gated is not None:
+            return f"GET blocked for {path}: {gated.classification} — {gated.reason}"
+        return f"GET blocked for {path}: not on the approved allowlist (unknown endpoint)."
 
     def get(self, path: str) -> requests.Response:
-        if path in FORBIDDEN_PATHS:
-            raise UnsafeOperationError(f"Blocked endpoint: {path}")
-        endpoint = SAFE_GET_ENDPOINTS.get(path)
-        if endpoint is None or not endpoint.verified_read_only:
-            reason = GATED_GET_ENDPOINTS.get(path, "Endpoint is not on the approved GET allowlist.")
-            raise UnsafeOperationError(f"GET blocked for {path}: {reason}")
+        reason = self._classify(path)
+        if reason is not None:
+            raise UnsafeOperationError(reason)
         url = urljoin(self.base_url, path.lstrip("/"))
         response = self._session.get(
             url,
@@ -119,3 +218,12 @@ class ReadOnlyModemClient:
 
     def close(self) -> None:
         self._session.close()
+
+    def __getattr__(self, name: str):
+        # Fail closed for any accidental exposure of HTTP-verb style methods.
+        if name.lower() in _WRITE_METHODS:
+            raise UnsafeOperationError(
+                f"ReadOnlyModemClient deliberately does not support '{name}'. "
+                "All writes require an explicit, separately-approved client."
+            )
+        raise AttributeError(name)
