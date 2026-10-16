@@ -329,23 +329,58 @@ def test_publication_succeeds_to_fresh_directory(dest):
     assert not list(dest.glob("*.part"))
 
 
-def test_distinct_runs_use_distinct_temp_files(dest, monkeypatch):
-    """Simulated concurrent/successive runs must never share a temp path."""
+def test_same_destination_race_uses_unique_temps_and_publishes_exactly_once(dest, monkeypatch):
+    """Two coordinated _publish() calls racing for ONE destination.
+
+    Simulated deterministically without threads or network: while call A is
+    suspended inside ``os.link`` (its temp already written), call B runs to
+    completion for the same destination. Proves that:
+    - each call uses a unique temp file even for an identical destination;
+    - exactly one call wins, and the final destination content is exactly
+      the winner's bytes (no overwrite of the published file);
+    - each call cleans only its own temp — B never deletes A's temp, and a
+      pre-existing foreign temp from another run is untouched.
+    """
     import os as real_os
 
+    real_link = real_os.link  # capture BEFORE monkeypatching the module attr
+
+    target = dest / "js_login.js"
+    foreign_tmp = dest / "js_login.js.foreign-run.part"
+    foreign_tmp.write_bytes(b"FOREIGN RUN TEMP")
+
     recorded: list[str] = []
-    real_link = real_os.link
+    state = {"a_suspended": False}
+    seen: dict[str, bool] = {}
 
-    def recording_link(src, dst):
+    def racing_link(src, dst):
         recorded.append(str(src))
-        real_link(src, dst)
+        if not state["a_suspended"]:
+            state["a_suspended"] = True
+            # Call B (the winner) runs to completion while A waits inside link.
+            dl._publish("/js/login.js", target, b"BODY OF WINNING CALL B")
+            seen["b_tmp_cleaned"] = not Path(recorded[1]).exists()
+            seen["a_tmp_untouched_by_b"] = Path(recorded[0]).exists()
+            seen["foreign_tmp_untouched"] = (
+                foreign_tmp.read_bytes() == b"FOREIGN RUN TEMP"
+            )
+        real_link(src, dst)  # for B: succeeds; for A: FileExistsError
 
-    monkeypatch.setattr("os.link", recording_link)
-    dl = JSAssetDownloader("https://192.168.70.1", dest, session=StubSession())
-    dl.fetch("/js/login.js")
-    dl.fetch("/js/common.js")
+    monkeypatch.setattr("os.link", racing_link)
+    dl = JSAssetDownloader("https://192.168.70.1", dest, dry_run=True)
+
+    with pytest.raises(AssetDownloadError, match="appeared during publication"):
+        dl._publish("/js/login.js", target, b"BODY OF LOSING CALL A")
+
     assert len(recorded) == 2
-    assert recorded[0] != recorded[1], "two runs must not share a temp file"
+    assert recorded[0] != recorded[1], "same destination must still get unique temps"
+    assert target.read_bytes() == b"BODY OF WINNING CALL B"
+    assert seen["b_tmp_cleaned"] is True
+    assert seen["a_tmp_untouched_by_b"] is True
+    assert seen["foreign_tmp_untouched"] is True
+    assert [p.name for p in dest.glob("*.part")] == [
+        "js_login.js.foreign-run.part"
+    ], "loser cleaned its own temp; foreign temp still intact"
 
 
 def test_foreign_temp_file_is_never_overwritten_or_deleted(dest):
