@@ -99,7 +99,13 @@ def test_unknown_endpoint_default_is_blocked():
 
 def test_every_gated_entry_classified_and_documented():
     for gated in GATED_GET_ENDPOINTS.values():
-        assert gated.classification in {"plausible_read_only", "unknown", "unsafe", "verified_read_only"}
+        assert gated.classification in {
+            "plausible_read_only",
+            "state_allocating",
+            "unknown",
+            "unsafe",
+            "verified_read_only",
+        }
         assert gated.reason.strip()
 
 
@@ -180,9 +186,21 @@ def test_ca_bundle_with_truncated_certificate_rejected(tmp_path):
 
 
 class FakeResponse:
-    def __init__(self, status_code=200, text="<response/>"):
+    """Offline stand-in (Phase 7: now supports the streaming read contract)."""
+
+    def __init__(self, status_code=200, text="<response/>", headers=None):
         self.status_code = status_code
         self.text = text
+        self.headers = headers or {}
+        self.closed = False
+
+    def iter_content(self, chunk_size: int):
+        body = self.text.encode("utf-8")
+        for i in range(0, len(body), chunk_size):
+            yield body[i: i + chunk_size]
+
+    def close(self):
+        self.closed = True
 
 
 class FakeSession:
@@ -231,7 +249,17 @@ def test_http_3xx_4xx_5xx_raise_instead_of_silently_passing():
 
 def test_no_http_verbs_exposed_for_writes():
     client = ReadOnlyModemClient(session=FakeSession())
-    for verb in ("post", "put", "patch", "delete", "head", "options", "request"):
+    for verb in (
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "head",
+        "options",
+        "request",
+        "connect",
+        "trace",
+    ):
         with pytest.raises(UnsafeOperationError):
             getattr(client, verb)
 

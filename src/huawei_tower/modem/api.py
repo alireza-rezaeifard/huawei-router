@@ -9,7 +9,16 @@ import requests
 from .errors import ModemHTTPError, UnsafeOperationError
 from .tls import resolve_verify_tls
 
-Classification = Literal["verified_read_only", "plausible_read_only", "unsafe", "unknown"]
+Classification = Literal[
+    "verified_read_only",
+    "plausible_read_only",
+    "state_allocating",
+    "unsafe",
+    "unknown",
+]
+
+_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+_CHUNK = 65536
 
 
 @dataclass(frozen=True)
@@ -32,6 +41,14 @@ class GatedEndpoint:
 # Tier 1 — verified read-only. Each was executed exactly once during the
 # read-only discovery session (docs/PHASE1_FINDINGS.md) and returned HTTP 200
 # with the documented XML payload. GET behavior is confirmed safe.
+#
+# NOTE (Phase 7): the two bootstrap endpoints were REMOVED from this dict —
+# they allocate server-side state (a session cookie / a token from the
+# single-use pool), so HTTP GET does NOT imply side-effect-free behavior.
+# They are now gated under GATED_GET_ENDPOINTS with classification
+# "state_allocating" with their prerequisites documented. This NARROWS the
+# callable surface (deliberate, documented compatibility impact; see
+# docs/PHASE7_OFFLINE_HARDENING.md). No new endpoint was added.
 SAFE_GET_ENDPOINTS: dict[str, Endpoint] = {
     "/api/device/basic_information": Endpoint(
         "/api/device/basic_information", True, "Basic device metadata; observed HTTP 200."
@@ -57,12 +74,6 @@ SAFE_GET_ENDPOINTS: dict[str, Endpoint] = {
     "/api/global/module-switch": Endpoint(
         "/api/global/module-switch", True, "Feature switches; observed HTTP 200."
     ),
-    "/api/webserver/SesTokInfo": Endpoint(
-        "/api/webserver/SesTokInfo", True, "Session bootstrap; response contains secrets -> never logged."
-    ),
-    "/api/webserver/token": Endpoint(
-        "/api/webserver/token", True, "Allocates a CSRF token (server-side state); body never logged."
-    ),
     "/api/monitoring/check-notifications": Endpoint(
         "/api/monitoring/check-notifications", True, "Notification counters; observed HTTP 200."
     ),
@@ -71,6 +82,30 @@ SAFE_GET_ENDPOINTS: dict[str, Endpoint] = {
 
 # Tier 2/4 — verified NOT enabled. Classification per docs/PHASE3_JS_ANALYSIS.md.
 GATED_GET_ENDPOINTS: dict[str, GatedEndpoint] = {
+    # Phase 7 reclassification: a GET on these two IDENTIFIERS allocates
+    # server-side state (a fresh session cookie, respectively a single-use
+    # CSRF token) and/or returns raw session secrets. Issuing either starts
+    # a session-material workflow, which is outside the approved read-only
+    # scope: a future explicitly-authorized live phase must call them as a
+    # DELIBERATE bootstrap step, not as a generic "read".
+    "/api/webserver/SesTokInfo": GatedEndpoint(
+        "/api/webserver/SesTokInfo",
+        "state_allocating",
+        "GET response contains a NEW session cookie (SessionID) + CSRF token; "
+        "the GET itself creates server-side session state, so it is not "
+        "side-effect-free. Only callable by a separately authorized "
+        "authentication phase that handles the returned secrets without "
+        "emitting them anywhere.",
+        evidence="Phase 1 probe + login flow step 1 (PHASE1 §Login)",
+    ),
+    "/api/webserver/token": GatedEndpoint(
+        "/api/webserver/token",
+        "state_allocating",
+        "GET consumes/allocates a SINGLE-USE CSRF token from the server's "
+        "token pool — a deliberate server-side state change. Not "
+        "side-effect-free; reserved for an authorized authentication phase.",
+        evidence="Phase 1 probe (single-use token pool notes)",
+    ),
     # Best Pair scan polling: the firmware main.js maps these names, but the
     # page modules that call them were never retrievable without login, so the
     # exact method/parameters/side effects are UNVERIFIED. A GET on an unknown
@@ -167,7 +202,7 @@ FORBIDDEN_PATHS: set[str] = {
     "/api/user/login",
 }
 
-_WRITE_METHODS = ("post", "put", "patch", "delete", "head", "options", "request")
+_WRITE_METHODS = ("post", "put", "patch", "delete", "head", "options", "request", "connect", "trace")
 
 
 class ReadOnlyModemClient:
@@ -180,6 +215,7 @@ class ReadOnlyModemClient:
         verify_tls: bool | str = True,
         timeout: float = 8.0,
         session: requests.Session | None = None,
+        max_response_bytes: int | None = _MAX_RESPONSE_BYTES,
     ) -> None:
         parsed = urlparse(base_url)
         if parsed.scheme != "https" or not parsed.hostname:
@@ -189,6 +225,21 @@ class ReadOnlyModemClient:
         # is rejected here, never silently forwarded to the session.
         self.verify_tls = resolve_verify_tls(verify_tls)
         self.timeout = timeout
+        # Response-size policy (Phase 7): enforced WHILE STREAMING the body —
+        # an oversized response is abandoned mid-read, not trimmed after the
+        # full body has already been buffered. ``None`` disables the limit
+        # (explicit, documented override for special callers); 0/negative or
+        # non-int values are rejected before any I/O.
+        if max_response_bytes is not None and (
+            isinstance(max_response_bytes, bool)
+            or not isinstance(max_response_bytes, int)
+            or max_response_bytes <= 0
+        ):
+            raise ValueError(
+                "max_response_bytes must be a positive integer or None to "
+                "explicitly disable the limit."
+            )
+        self.max_response_bytes = max_response_bytes
         if session is None:
             # Internally created session only: never inherit environment
             # proxies or .netrc credentials for the fixed modem origin (they
@@ -224,9 +275,41 @@ class ReadOnlyModemClient:
             timeout=self.timeout,
             verify=self.verify_tls,
             allow_redirects=False,
+            stream=True,
         )
-        if response.status_code != 200:
-            raise ModemHTTPError(f"GET {path} returned HTTP {response.status_code}")
+        total = 0
+        chunks: list[bytes] = []
+        try:
+            if response.status_code != 200:
+                # Refuse BEFORE touching the body: the HTTP status is safe to
+                # log; response bytes/headers may contain secrets or oversized
+                # payloads and must never be embedded in error text.
+                raise ModemHTTPError(
+                    f"GET {path} returned HTTP {response.status_code}"
+                )
+            for chunk in response.iter_content(_CHUNK):
+                total += len(chunk)
+                if (
+                    self.max_response_bytes is not None
+                    and total > self.max_response_bytes
+                ):
+                    raise ModemHTTPError(
+                        f"GET {path} response exceeded max_response_bytes "
+                        f"({self.max_response_bytes}); abandoned mid-read."
+                    )
+                chunks.append(chunk)
+        except requests.exceptions.RequestException as exc:
+            raise ModemHTTPError(
+                f"GET {path} response transfer was interrupted before completion."
+            ) from exc
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+        # Materialize the (already-received) body so the historical eager
+        # return contract holds: callers read .text/.content synchronously
+        # exactly as before; only oversized/interrupted transfers differ.
+        response._content = b"".join(chunks)  # noqa: SLF001 - requests content cache
         return response
 
     def close(self) -> None:
