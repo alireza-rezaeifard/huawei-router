@@ -1,0 +1,32 @@
+HTTP 200
+
+Key                       Value                                                                                        
+---                       -----                                                                                        
+Pragma                    no-cache                                                                                     
+X-Download-Options        noopen                                                                                       
+X-Frame-Options           SAMEORIGIN                                                                                   
+X-XSS-Protection          1; mode=block                                                                                
+Content-Security-Policy   default-src 'self' 'unsafe-inline' 'unsafe-eval'                                             
+X-Content-Type-Options    nosniff                                                                                      
+Strict-Transport-Security max-age=31536000                                                                             
+Connection                Keep-Alive                                                                                   
+Content-Length            442                                                                                          
+Cache-Control             no-cache, no-store, max-age=0, must-revalidate                                               
+Content-Type              text/xml                                                                                     
+Set-Cookie                SessionID=REDACTED...
+
+
+
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+<CurrentConnectTime>72327</CurrentConnectTime>
+<CurrentUpload>1846746968</CurrentUpload>
+<CurrentDownload>12908862238</CurrentDownload>
+<CurrentDownloadRate>342</CurrentDownloadRate>
+<CurrentUploadRate>212</CurrentUploadRate>
+<TotalUpload>4882663891</TotalUpload>
+<TotalDownload>36818950182</TotalDownload>
+<TotalConnectTime>245805</TotalConnectTime>
+<showtraffic>1</showtraffic>
+</response>
+

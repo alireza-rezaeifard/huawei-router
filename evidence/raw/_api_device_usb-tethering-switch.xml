@@ -1,0 +1,25 @@
+HTTP 200
+
+Key                       Value                                                                                        
+---                       -----                                                                                        
+Pragma                    no-cache                                                                                     
+X-Download-Options        noopen                                                                                       
+X-Frame-Options           SAMEORIGIN                                                                                   
+X-XSS-Protection          1; mode=block                                                                                
+Content-Security-Policy   default-src 'self' 'unsafe-inline' 'unsafe-eval'                                             
+X-Content-Type-Options    nosniff                                                                                      
+Strict-Transport-Security max-age=31536000                                                                             
+Connection                Keep-Alive                                                                                   
+Content-Length            101                                                                                          
+Cache-Control             no-cache, no-store, max-age=0, must-revalidate                                               
+Content-Type              text/xml                                                                                     
+Set-Cookie                SessionID=REDACTED...
+
+
+
+<?xml version="1.0" encoding="UTF-8"?>
+<error>
+<code>100002</code>
+<message></message>
+</error>
+

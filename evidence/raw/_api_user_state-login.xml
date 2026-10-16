@@ -1,0 +1,21 @@
+HTTP 200
+
+Key                       Value                                                                                        
+---                       -----                                                                                        
+Pragma                    no-cache                                                                                     
+X-Download-Options        noopen                                                                                       
+X-Frame-Options           SAMEORIGIN                                                                                   
+X-XSS-Protection          1; mode=block                                                                                
+Content-Security-Policy   default-src 'self' 'unsafe-inline' 'unsafe-eval'                                             
+X-Content-Type-Options    nosniff                                                                                      
+Strict-Transport-Security max-age=31536000                                                                             
+Connection                Keep-Alive                                                                                   
+Content-Length            442                                                                                          
+Cache-Control             no-cache, no-store, max-age=0, must-revalidate                                               
+Content-Type              text/xml                                                                                     
+Date                      Fri, 16 Oct 2026 14:53:59 GMT                                                                
+Set-Cookie                SessionID=REDACTED...
+
+
+
+<?xml version="1.0" encoding="UTF-8"?><response><rsapadingtype>1</rsapadingtype><wifipwdsamewithwebpwd>0</wifipwdsamewithwebpwd><extern_password_type>1</extern_password_type><remainwaittime>0</remainwaittime><State>-1</State><history_login_flag>0</history_login_flag><userlevel></userlevel><username></username><password_type>4</password_type><firstlogin>0</firstlogin><lockstatus>0</lockstatus><accounts_number>2</accounts_number></response>

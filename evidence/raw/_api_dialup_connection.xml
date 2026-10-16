@@ -1,0 +1,20 @@
+HTTP 200
+
+Key                       Value                                                                                        
+---                       -----                                                                                        
+Pragma                    no-cache                                                                                     
+X-Download-Options        noopen                                                                                       
+X-Frame-Options           SAMEORIGIN                                                                                   
+X-XSS-Protection          1; mode=block                                                                                
+Content-Security-Policy   default-src 'self' 'unsafe-inline' 'unsafe-eval'                                             
+X-Content-Type-Options    nosniff                                                                                      
+Strict-Transport-Security max-age=31536000                                                                             
+Connection                Keep-Alive                                                                                   
+Content-Length            248                                                                                          
+Cache-Control             no-cache, no-store, max-age=0, must-revalidate                                               
+Content-Type              text/xml                                                                                     
+Set-Cookie                SessionID=REDACTED...
+
+
+
+<?xml version="1.0" encoding="UTF-8"?><response><RoamAutoConnectEnable>0</RoamAutoConnectEnable><MaxIdelTime>0</MaxIdelTime><ConnectMode>0</ConnectMode><MTU>1500</MTU><auto_dial_switch>1</auto_dial_switch><pdp_always_on>0</pdp_always_on></response>

@@ -1,0 +1,37 @@
+﻿<!doctype html><html lang="en"><head><meta name="csrf_token" content="REDACTED_TOKEN">
+<meta name="csrf_token" content="REDACTED_TOKEN">
+<meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta content="telephone=no" name="format-detection"><meta name="viewport" content="width=device-width,initial-scale=0.1"><meta http-equiv="Content-Security-Policy" content="font-src * data:;"><script src="../lib/vue.global.prod.js?r=1709723942"></script><script src="../lib/vuex.global.prod.js?r=1709723942"></script><script src="../lib/vue-router.global.prod.js?r=1709723942"></script><script src="../lib/axios.min.js?r=1709723942"></script><link rel="stylesheet" href="../lib/element-plus/index.css"/><script src="../lib/element-plus/index.full.min.js?r=1709723942"></script><script src="../lib/element-plus/index.iife.min.js?r=1709723942"></script><script src="../lib/echarts.min.js?r=1709723942"></script><script src="../lib/emui-crypto.js?r=1709723942"></script><script src="../lib/devicemanagement.js?r=1709723942"></script><script src="../lib/symbol/doubleColor.js?r=1709723942"></script><script src="../lib/html5-qrcode.min.js?r=1709723942"></script><style>.deviceIcon {
+            width: 1em;
+            height: 1em;
+            vertical-align: -0.15em;
+            fill: currentColor;
+            overflow: hidden;
+        }</style><script src="../lib/vue-i18n.global.prod.js"></script><link rel="icon" href="/favicon.ico"><title></title><link href="../css/main.css?r=1709723942" rel="stylesheet"></head><body><noscript><strong>We're sorry but demo doesn't work properly without JavaScript enabled. Please enable it to continue.</strong></noscript><div id="app" class="index_app"></div><script src="../js/main.js"></script></body></html><script>if (navigator.userAgent.match(/Android/i) || navigator.userAgent.match(/webOS/i) || navigator.userAgent.match(/iPhone/i) || navigator.userAgent.match(/iPad/i)
+        || navigator.userAgent.match(/iPod/i) || navigator.userAgent.match(/BlackBerry/i) || navigator.userAgent.match(/Windows Phone/i)) {
+        (function (doc, win) {
+            var docEl = doc.documentElement;
+            var resizeEvt = "orientationchange" in window ? "orientationchange" : "resize";
+            var recalc = function () {
+                var clientWidths = docEl.clientWidth;
+                if (!clientWidths) {
+                    return;
+                }
+                if (clientWidths >= 640) {
+
+                    if(navigator.userAgent.match(/iPhone/i)){
+                        docEl.style.fontSize = "58px";
+                    }else{
+                        docEl.style.fontSize = "100px";
+                    }
+                } else {
+                    docEl.style.fontSize = 100 * (clientWidths / 640) + "px";
+                }
+            };
+            if (!doc.addEventListener) {
+                return;
+            }
+            win.addEventListener(resizeEvt, recalc, false);
+            doc.addEventListener("DOMContentLoaded", recalc, false);
+        }(document, window));
+    }</script>
+

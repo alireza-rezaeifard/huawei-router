@@ -1,0 +1,23 @@
+HTTP 200
+
+Key                       Value                                           
+---                       -----                                           
+Pragma                    no-cache                                        
+X-Download-Options        noopen                                          
+X-Frame-Options           SAMEORIGIN                                      
+X-XSS-Protection          1; mode=block                                   
+Content-Security-Policy   default-src 'self' 'unsafe-inline' 'unsafe-eval'
+X-Content-Type-Options    nosniff                                         
+Strict-Transport-Security max-age=31536000                                
+Content-Length            88                                              
+Cache-Control             no-cache, no-store, max-age=0, must-revalidate  
+Content-Type              text/xml                                        
+
+
+
+<?xml version="1.0" encoding="UTF-8"?>
+<error>
+<code>100003</code>
+<message/>
+</error>
+

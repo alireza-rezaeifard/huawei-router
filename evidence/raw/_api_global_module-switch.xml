@@ -1,0 +1,116 @@
+HTTP 200
+
+Key                       Value                                                                                        
+---                       -----                                                                                        
+Pragma                    no-cache                                                                                     
+X-Download-Options        noopen                                                                                       
+X-Frame-Options           SAMEORIGIN                                                                                   
+X-XSS-Protection          1; mode=block                                                                                
+Content-Security-Policy   default-src 'self' 'unsafe-inline' 'unsafe-eval'                                             
+X-Content-Type-Options    nosniff                                                                                      
+Strict-Transport-Security max-age=31536000                                                                             
+Connection                Keep-Alive                                                                                   
+Content-Length            3849                                                                                         
+Cache-Control             no-cache, no-store, max-age=0, must-revalidate                                               
+Content-Type              text/xml                                                                                     
+Set-Cookie                SessionID=REDACTED...
+
+
+
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+<ussd_enabled>0</ussd_enabled>
+<ussdmenuswitch_enabled>0</ussdmenuswitch_enabled>
+<bbou_enabled>1</bbou_enabled>
+<sms_enabled>1</sms_enabled>
+<sdcard_enabled>0</sdcard_enabled>
+<wifi_enabled>1</wifi_enabled>
+<statistic_enabled>1</statistic_enabled>
+<help_enabled>1</help_enabled>
+<stk_enabled>0</stk_enabled>
+<pb_enabled>0</pb_enabled>
+<wifioffload_enabled>0</wifioffload_enabled>
+<cradle_enabled>1</cradle_enabled>
+<multssid_enable>1</multssid_enable>
+<ipv6_enabled>1</ipv6_enabled>
+<monthly_volume_enabled>1</monthly_volume_enabled>
+<powersave_enabled>0</powersave_enabled>
+<sntp_enabled>1</sntp_enabled>
+<timeserverdisplay_enabled>1</timeserverdisplay_enabled>
+<sntpdisplay_enabled>1</sntpdisplay_enabled>
+<dstdisplay_enabled>0</dstdisplay_enabled>
+<ntpdisplay_enable>0</ntpdisplay_enable>
+<encrypt_enabled>1</encrypt_enabled>
+<dataswitch_enabled>1</dataswitch_enabled>
+<apn_retry_enabled>1</apn_retry_enabled>
+<single_pdn_switch_enabled>0</single_pdn_switch_enabled>
+<poweroff_enabled>0</poweroff_enabled>
+<bridge_enabled>1</bridge_enabled>
+<fw_macfilter_enabled>1</fw_macfilter_enabled>
+<zonetime_enabled>0</zonetime_enabled>
+<diagnosis_enabled>1</diagnosis_enabled>
+<pcp_enabled>0</pcp_enabled>
+<localupdate_enabled>1</localupdate_enabled>
+<cbs_enabled>0</cbs_enabled>
+<voip_enabled>1</voip_enabled>
+<qrcode_enabled>0</qrcode_enabled>
+<charger_enbaled>0</charger_enbaled>
+<vpn_enabled>1</vpn_enabled>
+<session_sms_enabled>1</session_sms_enabled>
+<bestsignal_enable>0</bestsignal_enable>
+<antenna_enabled>1</antenna_enabled>
+<iptv_enabled>0</iptv_enabled>
+<static_route_enabled>1</static_route_enabled>
+<static_route6_enabled>1</static_route6_enabled>
+<cwmp_enabled>1</cwmp_enabled>
+<atp_enabled>1</atp_enabled>
+<loginusername_enable>1</loginusername_enable>
+<autoreboot_enable>1</autoreboot_enable>
+<ipmacdisplay_enable>0</ipmacdisplay_enable>
+<timemanualsetdisplay_enable>0</timemanualsetdisplay_enable>
+<volte_enabled>1</volte_enabled>
+<get_pwd_enable>1</get_pwd_enable>
+<hostinfo_enable>1</hostinfo_enable>
+<timerule_enable>1</timerule_enable>
+<celllock_enabled>1</celllock_enabled>
+<chrlog_enable>0</chrlog_enable>
+<developermode_enable>1</developermode_enable>
+<syslogexport_clear_update_enable>1</syslogexport_clear_update_enable>
+<gdpr_enabled>1</gdpr_enabled>
+<gdpr_version>1</gdpr_version>
+<hilink_enabled>1</hilink_enabled>
+<hilink_switch>1</hilink_switch>
+<higame_enabled>0</higame_enabled>
+<higame_web_enabled>1</higame_web_enabled>
+<sa_privacy_notice>1</sa_privacy_notice>
+<sa_enable>1</sa_enable>
+<upnp_switch_without_hilink>1</upnp_switch_without_hilink>
+<websocket_enabled>1</websocket_enabled>
+<hilink_online_update_enabled>1</hilink_online_update_enabled>
+<web_feature_enabled>1</web_feature_enabled>
+<force_update_feature_enabled>1</force_update_feature_enabled>
+<statistic_day_remind_enable>0</statistic_day_remind_enable>
+<safeinfo_enable>0</safeinfo_enable>
+<mbbsec_enable>1</mbbsec_enable>
+<ai_enable>0</ai_enable>
+<hostnamechange_enabled>1</hostnamechange_enabled>
+<up_down_rate_enable>1</up_down_rate_enable>
+<automatically_update_enabled>1</automatically_update_enabled>
+<spreadname_enabled>0</spreadname_enabled>
+<lan_ipmodeswitch_enabled>1</lan_ipmodeswitch_enabled>
+<china_region_enable>0</china_region_enable>
+<aclEnabled>1</aclEnabled>
+<staticdns_enabled>0</staticdns_enabled>
+<nrProductEnable>1</nrProductEnable>
+<locationNominateEnable>1</locationNominateEnable>
+<ledCtrlEnable>1</ledCtrlEnable>
+<oneKeyCheckEnable>1</oneKeyCheckEnable>
+<bridgemode_onlineupdate_enable>1</bridgemode_onlineupdate_enable>
+<externalProductFlag>0</externalProductFlag>
+<urlmenudisplay_enable>0</urlmenudisplay_enable>
+<roamdisplay_enable>1</roamdisplay_enable>
+<dialupapn_enable>1</dialupapn_enable>
+<vendor_enable>1</vendor_enable>
+<ethspeedenable>1</ethspeedenable>
+</response>
+
