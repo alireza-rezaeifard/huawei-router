@@ -51,3 +51,37 @@ def block_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(socket, "gethostbyaddr", _deny)
     monkeypatch.setattr(socket, "getnameinfo", _deny)
     yield
+
+
+@pytest.fixture()
+def ca_bundle_pem(tmp_path: Path) -> str:
+    """A throwaway, offline-generated self-signed CA bundle for TLS tests.
+
+    Only the CERTIFICATE (public data) is written; the private key never
+    leaves memory and nothing here contacts any network.
+    """
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, "offline-test-ca")]
+    )
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=365))
+        .sign(key, hashes.SHA256())
+    )
+    bundle = tmp_path / "ca.pem"
+    bundle.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    return str(bundle)

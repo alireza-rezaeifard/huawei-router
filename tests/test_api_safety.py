@@ -127,15 +127,23 @@ def test_tls_default_forwarded_is_true_never_false():
     assert session.calls[0][1]["verify"] is True
 
 
-def test_tls_ca_bundle_path_keeps_verification_enabled(tmp_path):
-    ca = tmp_path / "ca.pem"
-    ca.write_text("-----BEGIN CERTIFICATE-----\n")
+def test_tls_ca_bundle_path_keeps_verification_enabled(ca_bundle_pem):
     session = FakeSession()
-    client = ReadOnlyModemClient(session=session, verify_tls=str(ca))
+    client = ReadOnlyModemClient(session=session, verify_tls=ca_bundle_pem)
     client.get("/api/device/basic_information")
     forwarded = session.calls[0][1]["verify"]
-    assert forwarded == str(ca.resolve())
+    assert forwarded == ca_bundle_pem
     assert forwarded is not False
+
+
+def test_internally_created_session_does_not_inherit_environment():
+    client = ReadOnlyModemClient()
+    assert client._session.trust_env is False
+
+
+def test_caller_injected_session_keeps_explicit_configuration():
+    client = ReadOnlyModemClient(session=FakeSession())
+    assert isinstance(client._session, FakeSession)
 
 
 def test_tls_missing_ca_bundle_rejected_before_any_io():
@@ -146,6 +154,29 @@ def test_tls_missing_ca_bundle_rejected_before_any_io():
     with pytest.raises(ValueError):
         ReadOnlyModemClient(session=session, verify_tls=missing)
     assert session.calls == []
+
+
+def test_ca_bundle_without_certificate_block_rejected(tmp_path):
+    ca = tmp_path / "empty_ca.pem"
+    ca.write_text("plain text, not a PEM bundle\n")
+    with pytest.raises(ValueError, match="no PEM certificate block"):
+        ReadOnlyModemClient(session=NoNetworkSession(), verify_tls=str(ca))
+
+
+def test_ca_bundle_with_malformed_certificate_rejected(tmp_path):
+    ca = tmp_path / "bad_ca.pem"
+    ca.write_text(
+        "-----BEGIN CERTIFICATE-----\nZm9vYmFy\n-----END CERTIFICATE-----\n"
+    )
+    with pytest.raises(ValueError, match="malformed PEM certificate"):
+        ReadOnlyModemClient(session=NoNetworkSession(), verify_tls=str(ca))
+
+
+def test_ca_bundle_with_truncated_certificate_rejected(tmp_path):
+    ca = tmp_path / "cut_ca.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----\nZm9vYmFy\n")
+    with pytest.raises(ValueError, match="truncated PEM certificate"):
+        ReadOnlyModemClient(session=NoNetworkSession(), verify_tls=str(ca))
 
 
 class FakeResponse:

@@ -40,6 +40,7 @@ Safety properties implemented here:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Protocol
@@ -238,6 +239,12 @@ class JSAssetDownloader:
         created_here = False
         if session is None:
             session = requests.Session()
+            # Caller-injected sessions keep their explicit configuration;
+            # internally created sessions must not inherit environment
+            # proxies, .netrc credentials, or REQUESTS_CA_BUNDLE (odd
+            # redirection risk for a fixed modem origin). TLS verification
+            # itself is unaffected — ``verify`` is passed per request.
+            session.trust_env = False
             created_here = True
         try:
             url = urljoin(self._base, asset.path.lstrip("/"))
@@ -276,13 +283,52 @@ class JSAssetDownloader:
 
             dest = self._dest / path.lstrip("/").replace("/", "_")
             self._dest.mkdir(parents=True, exist_ok=True)
-            tmp = dest.with_suffix(dest.suffix + ".tmp")
-            tmp.write_bytes(body)
-            tmp.replace(dest)
+            self._publish(path, dest, body)
             return dest
         finally:
             if created_here:
                 session.close()  # type: ignore[union-attr]
+
+    def _publish(self, path: str, dest: Path, body: bytes) -> None:
+        """Atomically publish ``body`` at ``dest`` — never overwriting anything.
+
+        Strategy: write a sibling ``*.tmp`` file, then hard-link it into place.
+        ``os.link`` fails atomically if ``dest`` exists (on both Windows/NTFS
+        and POSIX), so a destination created even nanoseconds earlier — or by
+        a concurrent process — is preserved byte-for-byte. There is no
+        rename/replace step and no silent clobber on any platform: on
+        filesystems without hard-link support publication is REFUSED
+        (fail-closed) instead of falling back to an overwriting rename.
+        Temporary files are always cleaned up on success and failure.
+        """
+        if dest.exists():
+            raise AssetDownloadError(
+                f"Destination for {path} already exists ({dest.name}); the "
+                "previous file is preserved and nothing was overwritten."
+            )
+        tmp = dest.with_suffix(dest.suffix + ".tmp")
+        try:
+            tmp.write_bytes(body)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+        try:
+            os.link(tmp, dest)
+        except FileExistsError as exc:
+            # Destination appeared concurrently: preserve it byte-for-byte.
+            raise AssetDownloadError(
+                f"Destination for {path} appeared during publication; the "
+                "concurrently created file was preserved, nothing overwritten."
+            ) from exc
+        except OSError as exc:
+            # No hard-link support here (e.g. exFAT/network share): fail closed
+            # rather than risk a clobbering rename fallback.
+            raise AssetDownloadError(
+                f"Filesystem does not support atomic no-clobber publication "
+                f"for {dest.parent}; refusing to store ({exc.errno})."
+            ) from exc
+        finally:
+            tmp.unlink(missing_ok=True)
 
     def _peer_origin(self, url: str) -> str:
         return urlparse(url).hostname

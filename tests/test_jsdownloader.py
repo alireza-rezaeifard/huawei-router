@@ -248,15 +248,78 @@ def test_tls_missing_ca_bundle_rejected_before_any_io(dest: Path, tmp_path: Path
     assert session.calls == []
 
 
-def test_tls_ca_bundle_forwarded_without_disabling_verification(dest: Path, tmp_path: Path):
-    ca = tmp_path / "ca.pem"
-    ca.write_text("-----BEGIN CERTIFICATE-----\n")
+def test_tls_ca_bundle_forwarded_without_disabling_verification(ca_bundle_pem, dest: Path):
     session = StubSession(StubResponse(200, b".js"))
-    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session, verify_tls=str(ca))
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session, verify_tls=ca_bundle_pem)
     dl.fetch("/js/login.js")
     forwarded = session.calls[0][1]["verify"]
-    assert forwarded == str(ca.resolve())
+    assert forwarded == ca_bundle_pem
     assert forwarded is not False
+
+
+def test_internally_created_session_does_not_inherit_environment(dest, monkeypatch):
+    instances = []
+
+    class RecorderSession(StubSession):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.trust_env = True  # simulate requests.Session default
+            instances.append(self)
+
+    monkeypatch.setattr("requests.Session", RecorderSession)
+    dl = JSAssetDownloader("https://192.168.70.1", dest)
+    dl.fetch("/js/login.js")
+    assert instances, "downloader should have created a session internally"
+    assert instances[0].trust_env is False
+    assert len(instances) == 1
+
+
+def test_no_clobber_existing_destination_is_preserved_byte_for_byte(dest):
+    session = StubSession(StubResponse(200, b"new js body"))
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
+    existing = dest / "js_login.js"
+    existing.write_bytes(b"OLD EVIDENCE BYTES")
+    with pytest.raises(AssetDownloadError, match="already exists"):
+        dl.fetch("/js/login.js")
+    assert existing.read_bytes() == b"OLD EVIDENCE BYTES"
+    assert not list(dest.glob("*.tmp"))
+
+
+def test_tmp_files_are_cleaned_up_on_publication_failure(dest, monkeypatch):
+    session = StubSession(StubResponse(200, b"body"))
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
+
+    def broken_link(src, dst):
+        raise OSError(22, "simulated unsupported filesystem")
+
+    monkeypatch.setattr("os.link", broken_link)
+    with pytest.raises(AssetDownloadError, match="no-clobber"):
+        dl.fetch("/js/login.js")
+    assert not list(dest.glob("*.tmp"))
+
+
+def test_concurrent_destination_appearance_is_never_overwritten(dest, monkeypatch):
+    session = StubSession(StubResponse(200, b"body"))
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
+
+    def racing_link(src, dst):
+        Path(dst).write_bytes(b"CONCURRENT FILE")
+        raise FileExistsError(17, "destination raced us")
+
+    monkeypatch.setattr("os.link", racing_link)
+    with pytest.raises(AssetDownloadError, match="appeared during publication"):
+        dl.fetch("/js/login.js")
+    assert (dest / "js_login.js").read_bytes() == b"CONCURRENT FILE"
+    assert not list(dest.glob("*.tmp"))
+
+
+def test_publication_succeeds_to_fresh_directory(dest):
+    session = StubSession(StubResponse(200, b"fresh body"))
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
+    stored = dl.fetch("/js/login.js")
+    assert stored is not None
+    assert stored.read_bytes() == b"fresh body"
+    assert not list(dest.glob("*.tmp"))
 
 
 def test_session_without_get_rejects_early(dest: Path):
