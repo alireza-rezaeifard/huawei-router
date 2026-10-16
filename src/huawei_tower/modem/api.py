@@ -7,6 +7,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from .errors import ModemHTTPError, UnsafeOperationError
+from .tls import resolve_verify_tls
 
 Classification = Literal["verified_read_only", "plausible_read_only", "unsafe", "unknown"]
 
@@ -184,7 +185,9 @@ class ReadOnlyModemClient:
         if parsed.scheme != "https" or not parsed.hostname:
             raise ValueError("Modem base URL must be an explicit HTTPS URL.")
         self.base_url = base_url.rstrip("/") + "/"
-        self.verify_tls = verify_tls
+        # Fail closed BEFORE any I/O: verify_tls=False (or any weakening value)
+        # is rejected here, never silently forwarded to the session.
+        self.verify_tls = resolve_verify_tls(verify_tls)
         self.timeout = timeout
         self._session = session or requests.Session()
         self._session.headers.update({"Accept": "*/*", "User-Agent": "H158-381-BestPair/0.3 read-only"})

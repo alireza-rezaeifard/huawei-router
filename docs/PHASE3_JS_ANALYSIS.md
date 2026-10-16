@@ -261,9 +261,7 @@ the safety rules explicitly forbid live auth POSTs. Therefore:
 - `tests/conftest.py` — new autouse socket-killer (marker `network` opt-out) = full-suite
   offline guarantee.
 
-## 7. Workspace-relocation note (preserved)
-
-Commit `b665ac9` initially lived under `huawei-h158381-phase2/…` (as the earlier planning doc
+## 7. Workspace-relocation note (preserved)Commit `b665ac9` initially lived under `huawei-h158381-phase2/…` (as the earlier planning doc
 referenced). The working tree had *already relocated* these files to the repo root
 (`src/`, `tests/`, `tools/`, `docs/PHASE2_STATUS.md`) as unstaged moves before this phase
 started. Per the no-destructive-change rule, this phase **kept the relocated layout**; the
@@ -292,11 +290,77 @@ never persisted):
    SCRAM login (challenge → authentication_login) with the new offline-verified client,
    capturing only *shape*, never values. Success criterion: HTTP 200 with a `<response>` body
    (no `<error>`) and both signature checks pass.
-2. Immediately after, run `JSAssetDownloader` (still unauthenticated rules) → then flip its
-   documented `allow_authenticated` gate (needs explicit approval) to fetch the four admin
+2. Immediately after, run `JSAssetDownloader` for unauthenticated assets, then — only with
+   explicit approval — construct an `AuthenticatedDownloadAuthorization` naming ONE exact admin
+   asset path per `fetch()` call (the downloader cannot enable authenticated downloads any other
+   way; a session cookie alone is never sufficient) to fetch the four admin
    chunks (`celllock`, `lockband`, `mobilesearch`, `onekey`) from the local machine, revealing
    the exact POST schemas for `best-signal-position`, lock/cell APIs and their `handle-cell`
    guard flags. Then close.
 
 Both steps remain PHYSICALLY gated behind the user's explicit go-ahead; until then the test
 suite and static analysis deliverable are complete without touching the modem.
+
+## 10. Phase 3.1 — security hardening addendum (as implemented)
+
+Status of this addendum: **offline only**. No live modem request, no SCRAM login,
+no authenticated download was performed during Phase 3.1; the work was source,
+tests, and documentation only.
+
+**Enforced TLS verification policy (`src/huawei_tower/modem/tls.py`):**
+
+- Verification is always on. There is no supported way to disable it.
+- `verify_tls=True` (default): requests' default trust store.
+- `verify_tls="<path>"`: a non-empty path to an *existing* CA bundle **file**;
+  verification stays enabled and the bundle is additionally trusted.
+- `verify_tls=False` (and every other weakening value, incl. `None`, `1`,
+  `0`, `""`): rejected with `ValueError` in the constructors of
+  `ReadOnlyModemClient` and `JSAssetDownloader` — i.e. before any network I/O.
+- The resolver (`tls.resolve_verify_tls`) is the single validation point for
+  both clients; the raw caller value is never forwarded to a session.
+  HTTPS-only base URLs and disabled redirects (`allow_redirects=False`, any
+  3xx ⇒ error) are unchanged.
+- No `disable_warnings`, `verify=False`, or warning-suppression bypass exists
+  in the codebase; test sessions are injected mocks and never weaken
+  production TLS behavior.
+
+**Authenticated-download authorization (resolves the Phase 3
+`authenticated_allowed` / docs `allow_authenticated` naming inconsistency):**
+
+- The mutable gate is gone. `JSAssetDownloader` no longer has any class or
+  instance attribute that can enable authenticated downloads; stale object
+  state cannot open the gate (regression-tested by attribute-spoof).
+- The consistent name is **`AuthenticatedDownloadAuthorization`** — a frozen
+  dataclass the approving operator constructs *outside* the downloader
+  (the downloader never creates one). It requires:
+  - `approved_path`: an approved asset path that actually requires an
+    authenticated session (validated at construction),
+  - `operator`: non-empty identity of the approver,
+  - `reason`: non-empty auditable justification.
+- Its use is **per operation**: `fetch(path, authorization=...)` accepts an
+  authorization only for the exact `path` named; anything else — missing,
+  wrong type, mis-scoped — is rejected before any network I/O. One asset's
+  authorization can never silently cover an unrelated asset.
+- Default remains disabled: no environment variable, implicit default, truthy
+  stray value, or live session cookie/token (`SesInfo`/cookie possession) can
+  authorize an authenticated download; the downloader also never performs a
+  login itself.
+
+**What the Phase 3.1 tests establish (67 total, all passing):**
+
+- TLS: `verify_tls=False` (and `None`/`1`/`0`/`""`) raise before any I/O in
+  both clients; the forwarded session argument is `True` by default and a
+  *resolved path* for CA bundles — never `False`; non-existent CA paths are
+  rejected before I/O; HTTPS and redirect rejection prove unchanged.
+- Auth gate: admin chunks rejected by default; wrong-typed, mis-scoped, and
+  stale-state authorizations rejected before I/O; the positive mechanic is
+  exercised **only against a stub session** writing a mocked body into a
+  pytest `tmp_path` — no network, no real asset content.
+- Unchanged offline guarantee: the autouse socket-killer runs for the whole
+  suite (no `network` marker exists in any test).
+
+**What remains unverified (unchanged from §8):** everything listed there,
+plus that the authorization path has never been exercised against the real
+modem (it requires an approved live phase per §9). Client-side SCRAM remains
+statically/offline verified; actual modem compatibility is proven only by the
+future approved live round-trip, and endpoint side effects stay unverified.

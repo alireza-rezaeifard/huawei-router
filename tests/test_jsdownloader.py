@@ -8,6 +8,7 @@ from huawei_tower.modem.errors import ModemHTTPError
 from huawei_tower.modem.jsdownloader import (
     APPROVED_ASSETS,
     AssetDownloadError,
+    AuthenticatedDownloadAuthorization,
     JSAssetDownloader,
 )
 
@@ -84,9 +85,94 @@ def test_unapproved_path_is_rejected_before_any_network_call(dest: Path):
 def test_admin_chunks_blocked_without_approved_authentication(dest: Path):
     session = StubSession()
     dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
-    with pytest.raises(AssetDownloadError):
-        dl.fetch("/js/celllock-celllock-vue.js")
+    admin_paths = [
+        path
+        for path, asset in APPROVED_ASSETS.items()
+        if asset.requires_authenticated_session
+    ]
+    assert admin_paths, "approved list must still gate its admin chunks"
+    for path in admin_paths:
+        with pytest.raises(AssetDownloadError):
+            dl.fetch(path)
     assert session.calls == []
+    assert not list(dest.iterdir())
+
+
+AUTH_ASSET = "/js/lockband.js"  # one of the admin chunks (offline stubs only)
+
+
+def test_admin_chunk_rejected_even_after_failed_stale_state_spoof(dest: Path):
+    """Old class attribute cannot be resurrected to open the gate."""
+    session = StubSession()
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
+    dl.__dict__["authenticated_allowed"] = True
+    with pytest.raises(AssetDownloadError):
+        dl.fetch(AUTH_ASSET)
+    assert session.calls == []
+
+
+def test_admin_chunk_authorization_wrong_type_rejected_before_io(dest: Path):
+    session = StubSession()
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
+    for fake in (True, "yes", object(), ("approved",), None):
+        with pytest.raises(AssetDownloadError):
+            dl.fetch(AUTH_ASSET, authorization=fake)
+    assert session.calls == []
+    assert not list(dest.iterdir())
+
+
+def test_authorization_scoped_to_other_path_rejected_before_io(dest: Path):
+    session = StubSession()
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
+    other = AuthenticatedDownloadAuthorization(
+        approved_path="/js/celllock-celllock-vue.js",
+        operator="reviewer",
+        reason="authorization for an unrelated chunk",
+    )
+    with pytest.raises(AssetDownloadError):
+        dl.fetch(AUTH_ASSET, authorization=other)
+    assert session.calls == []
+
+
+def test_invalid_authorization_construction_rejected(dest: Path):
+    with pytest.raises(ValueError):
+        AuthenticatedDownloadAuthorization(
+            approved_path="/js/login.js",  # not an auth-required asset
+            operator="reviewer",
+            reason="x",
+        )
+    with pytest.raises(ValueError):
+        AuthenticatedDownloadAuthorization(approved_path=AUTH_ASSET, operator="", reason="x")
+    with pytest.raises(ValueError):
+        AuthenticatedDownloadAuthorization(approved_path=AUTH_ASSET, operator="op", reason="  ")
+    with pytest.raises(ValueError):
+        AuthenticatedDownloadAuthorization(approved_path="/js/does/not/exist.js", operator="op", reason="x")
+
+
+def test_valid_authorization_allows_offline_mocked_download_only(dest: Path):
+    """Positive gate mechanic — StubSession only, never a live fetch."""
+    session = StubSession(StubResponse(200, b"// offline mocked test body"))
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session)
+    auth = AuthenticatedDownloadAuthorization(
+        approved_path=AUTH_ASSET,
+        operator="offline-test",
+        reason="unit test of the authorization mechanic; no network I/O",
+    )
+    stored = dl.fetch(AUTH_ASSET, authorization=auth)
+    assert stored is not None
+    assert stored.read_bytes() == b"// offline mocked test body"
+    url, kwargs = session.calls[0]
+    assert url == "https://192.168.70.1" + AUTH_ASSET
+    assert kwargs["allow_redirects"] is False
+    assert kwargs["verify"] is True
+
+
+def test_download_gate_does_not_default_authorization(dest: Path):
+    """The downloader must never synthesize an authorization itself."""
+    session = StubSession()
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session, dry_run=True)
+    with pytest.raises(AssetDownloadError):
+        dl.fetch(AUTH_ASSET)
 
 
 def test_redirects_are_refused(dest: Path):
@@ -144,6 +230,33 @@ def test_bad_base_url_rejected(dest: Path):
     for bad_url in ("http://192.168.70.1", "https:", "plain-host"):
         with pytest.raises(ValueError):
             JSAssetDownloader(bad_url, dest)
+
+
+def test_tls_verification_cannot_be_disabled(dest: Path):
+    session = StubSession()
+    for bad in (False, None, 1, 0, ""):
+        with pytest.raises(ValueError):
+            JSAssetDownloader("https://192.168.70.1", dest, session=session, verify_tls=bad)
+    assert session.calls == []
+
+
+def test_tls_missing_ca_bundle_rejected_before_any_io(dest: Path, tmp_path: Path):
+    session = StubSession()
+    missing = tmp_path / "missing_ca.pem"
+    with pytest.raises(ValueError):
+        JSAssetDownloader("https://192.168.70.1", dest, session=session, verify_tls=str(missing))
+    assert session.calls == []
+
+
+def test_tls_ca_bundle_forwarded_without_disabling_verification(dest: Path, tmp_path: Path):
+    ca = tmp_path / "ca.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----\n")
+    session = StubSession(StubResponse(200, b".js"))
+    dl = JSAssetDownloader("https://192.168.70.1", dest, session=session, verify_tls=str(ca))
+    dl.fetch("/js/login.js")
+    forwarded = session.calls[0][1]["verify"]
+    assert forwarded == str(ca.resolve())
+    assert forwarded is not False
 
 
 def test_session_without_get_rejects_early(dest: Path):

@@ -20,11 +20,18 @@ Observed at discovery time (unauthenticated):
 Safety properties implemented here:
 - HTTPS-only modem origin; a fixed explicit target list; no redirects
   (allow_redirects=False, 3xx => error).
+- TLS certificate verification can never be disabled (``verify_tls=False``
+  and any other weakening value raise ``ValueError`` in the constructor,
+  before any I/O; see ``tls.resolve_verify_tls`` — Phase 3.1).
 - Path traversal and foreign-origin rejection (only constants leave this file).
 - Hard byte ceiling per asset, streamed; oversize => error, nothing stored.
-- Unauthenticated-only in this phase: authenticated downloads require separate,
-  documented approval and are gated through ``allow_authenticated=False``.
-- ''page'' pages such as /html/index.html are fetched from the same approved
+- Unauthenticated-only by default: an asset flagged
+  ``requires_authenticated_session`` is refused unless the caller supplies a
+  narrowly scoped ``AuthenticatedDownloadAuthorization`` naming that exact
+  asset path on THAT ``fetch()`` call. The downloader never constructs an
+  authorization itself, never performs a login, and possession of a session
+  cookie does not bypass the gate (Phase 3.1 fail-closed redesign).
+- HTML pages such as /html/index.html are fetched from the same approved
   constants; dry-run mode performs no network I/O.
 - Assets are written only under a caller-supplied directory; the caller must
   point it at a Git-excluded evidence folder (default suggestion documented).
@@ -37,6 +44,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Protocol
 from urllib.parse import urljoin, urlparse
+
+from .tls import resolve_verify_tls
 
 _MAX_ASSET_BYTES = 8 * 1024 * 1024
 _ALLOWED_SUFFIX = ".js"
@@ -113,6 +122,37 @@ class AssetDownloadError(RuntimeError):
     """Raised when an asset cannot be downloaded safely."""
 
 
+@dataclass(frozen=True)
+class AuthenticatedDownloadAuthorization:
+    """Explicit, narrowly scoped consent for ONE authenticated asset download.
+
+    This object must be constructed deliberately by an approving operator
+    (outside this module — the downloader never creates one). It is frozen,
+    scoped to exactly ONE approved asset path, and requires a non-empty
+    operator identity and justification so approvals are auditable.
+
+    A live session cookie, token, or `authenticated_allowed` state never
+    substitutes for this object.
+    """
+
+    approved_path: str
+    operator: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        asset = APPROVED_ASSETS.get(self.approved_path)
+        if asset is None or not asset.requires_authenticated_session:
+            raise ValueError(
+                "AuthenticatedDownloadAuthorization.approved_path must name an "
+                "approved asset that requires an authenticated session; got "
+                f"{self.approved_path!r}."
+            )
+        if not self.operator or not self.operator.strip():
+            raise ValueError("AuthenticatedDownloadAuthorization.operator must be non-empty.")
+        if not self.reason or not self.reason.strip():
+            raise ValueError("AuthenticatedDownloadAuthorization.reason must be non-empty.")
+
+
 class JSAssetDownloader:
     """Downloads approved firmware JS assets into a local evidence directory."""
 
@@ -135,7 +175,9 @@ class JSAssetDownloader:
         self._dest = Path(dest_dir)
         self._session = session  # lazily built when not a dry run
         self._timeout = timeout
-        self._verify_tls = verify_tls
+        # Fail closed BEFORE any I/O: verify_tls=False (or any weakening value)
+        # is rejected here, never silently forwarded to the session.
+        self._verify_tls = resolve_verify_tls(verify_tls)
         self._dry_run = dry_run
         self._max_bytes = max_asset_bytes
 
@@ -146,26 +188,47 @@ class JSAssetDownloader:
             for a in APPROVED_ASSETS.values()
         ]
 
-    authenticated_allowed: bool = False  # Phase 3 boundary: auth not yet approved.
-
-    def _validate_asset(self, path: str) -> FirmwareAsset:
+    def _validate_asset(
+        self,
+        path: str,
+        authorization: AuthenticatedDownloadAuthorization | None,
+    ) -> FirmwareAsset:
         asset = APPROVED_ASSETS.get(path)
         if asset is None:
             raise AssetDownloadError(f"'{path}' is not on the approved asset list.")
         if not path.startswith("/") or ".." in path or "\\" in path:
             raise AssetDownloadError("Refusing non-canonical or traversal paths.")
-        if asset.requires_authenticated_session and not self.authenticated_allowed:
-            raise AssetDownloadError(
-                f"{path} requires an authenticated session; authenticated downloads "
-                "are not approved yet. See docs/PHASE3_JS_ANALYSIS.md."
-            )
+        if asset.requires_authenticated_session:
+            if not isinstance(authorization, AuthenticatedDownloadAuthorization):
+                raise AssetDownloadError(
+                    f"{path} requires an authenticated session; the download is "
+                    "refused unless an AuthenticatedDownloadAuthorization naming "
+                    "this exact path is supplied to fetch() for this call. "
+                    "Session state alone never authorizes a download. "
+                    "See docs/PHASE3_JS_ANALYSIS.md."
+                )
+            if authorization.approved_path != path:
+                raise AssetDownloadError(
+                    f"Authorization covers '{authorization.approved_path}', "
+                    f"not '{path}'; refusing to authorize an unrelated asset."
+                )
         return asset
 
-    def fetch(self, path: str) -> Path | None:
-        """Download one approved asset and store it under ``dest_dir``."""
+    def fetch(
+        self,
+        path: str,
+        *,
+        authorization: AuthenticatedDownloadAuthorization | None = None,
+    ) -> Path | None:
+        """Download one approved asset and store it under ``dest_dir``.
+
+        ``authorization`` is required only for assets flagged
+        ``requires_authenticated_session``; it must name exactly ``path``.
+        Validation happens before any network I/O.
+        """
         from .errors import ModemHTTPError
 
-        asset = self._validate_asset(path)
+        asset = self._validate_asset(path, authorization)
         if self._dry_run:
             return None  # no network I/O in dry-run mode
 

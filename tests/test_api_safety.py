@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import requests
 
@@ -108,6 +110,42 @@ def test_non_https_base_url_rejected():
         ReadOnlyModemClient("ftp://192.168.70.1")
     with pytest.raises(ValueError):
         ReadOnlyModemClient("https:")
+
+
+def test_tls_verification_cannot_be_disabled_before_any_io():
+    session = NoNetworkSession()
+    for bad in (False, None, 1, 0, ""):
+        with pytest.raises(ValueError):
+            ReadOnlyModemClient(session=session, verify_tls=bad)
+    assert session.calls == []
+
+
+def test_tls_default_forwarded_is_true_never_false():
+    session = FakeSession()
+    client = ReadOnlyModemClient(session=session)
+    client.get("/api/device/basic_information")
+    assert session.calls[0][1]["verify"] is True
+
+
+def test_tls_ca_bundle_path_keeps_verification_enabled(tmp_path):
+    ca = tmp_path / "ca.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----\n")
+    session = FakeSession()
+    client = ReadOnlyModemClient(session=session, verify_tls=str(ca))
+    client.get("/api/device/basic_information")
+    forwarded = session.calls[0][1]["verify"]
+    assert forwarded == str(ca.resolve())
+    assert forwarded is not False
+
+
+def test_tls_missing_ca_bundle_rejected_before_any_io():
+    session = NoNetworkSession()
+    missing = "Z:/definitely/not/here/ca.pem"
+    if Path(missing).exists():  # environment sanity, never expected on CI hosts
+        missing = "Z:/unavailable.pem"
+    with pytest.raises(ValueError):
+        ReadOnlyModemClient(session=session, verify_tls=missing)
+    assert session.calls == []
 
 
 class FakeResponse:
