@@ -1,7 +1,8 @@
-"""Offline Best Pair core engine for the Huawei H158-381.
+"""Offline Best Pair engine and evidence profile for the Huawei H158-381.
 
-Public surface for Phase 8. The engine is pure Python: no modem I/O, no HTTP,
-and no JavaScript execution.
+The public surface is pure Python: no modem I/O, no HTTP, and no JavaScript
+execution. Phase 9 adds provenance-tagged extraction from sanitized local
+evidence; observed facts are never promoted to confirmed capabilities.
 """
 
 from .engine import (
@@ -32,10 +33,24 @@ from .engine import (
     rank_candidates,
     score_combination,
 )
+from .evidence import (
+    EVIDENCE_SOURCES,
+    DeviceEvidence,
+    EvidenceContradictionError,
+    EvidenceError,
+    EvidenceExtractionError,
+    EvidenceFact,
+    EvidenceGap,
+    EvidenceValidationError,
+    build_profile_from_evidence,
+    collect_device_facts,
+    repository_device_profile,
+)
 
 __all__ = [
     "DEFAULT_FILTER",
     "DEFAULT_WEIGHTS",
+    "EVIDENCE_SOURCES",
     "METRIC_NAMES",
     "METRIC_RANGES",
     "BandCandidate",
@@ -49,15 +64,25 @@ __all__ = [
     "CombinationResult",
     "CombinationScore",
     "DeviceBandProfile",
+    "DeviceEvidence",
+    "EvidenceContradictionError",
+    "EvidenceError",
+    "EvidenceExtractionError",
+    "EvidenceFact",
+    "EvidenceGap",
+    "EvidenceValidationError",
     "RankingResult",
     "ScoreComponent",
     "ScoringWeights",
     "SignalSnapshot",
     "analyze",
+    "build_profile_from_evidence",
+    "collect_device_facts",
     "evaluate_candidate",
     "evidence_minimal_profile",
     "generate_combinations",
     "normalize_metric",
     "rank_candidates",
+    "repository_device_profile",
     "score_combination",
 ]

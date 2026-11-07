@@ -8,6 +8,7 @@ import pytest
 from huawei_tower.bestpair import (
     DEFAULT_FILTER,
     DEFAULT_WEIGHTS,
+    EVIDENCE_SOURCES,
     BandCandidate,
     BandSlot,
     BestPairValidationError,
@@ -15,17 +16,26 @@ from huawei_tower.bestpair import (
     CandidateFilter,
     CandidateScore,
     DeviceBandProfile,
+    DeviceEvidence,
+    EvidenceContradictionError,
+    EvidenceExtractionError,
+    EvidenceFact,
+    EvidenceValidationError,
     ScoringWeights,
     SignalSnapshot,
     analyze,
+    build_profile_from_evidence,
+    collect_device_facts,
     evaluate_candidate,
     evidence_minimal_profile,
     generate_combinations,
     normalize_metric,
     rank_candidates,
+    repository_device_profile,
     score_combination,
 )
 from huawei_tower.bestpair import engine as engine_module
+from huawei_tower.bestpair import evidence as evidence_module
 
 
 def slot(rat: str, band: str, capability: str = "confirmed") -> BandSlot:
@@ -591,3 +601,413 @@ def test_engine_module_has_no_network_or_modem_io_imports():
     assert "DEFAULT_WEIGHTS" in source
     assert DEFAULT_FILTER.required_metrics == ("rsrp",)
     assert DEFAULT_WEIGHTS.rsrp == 0.55
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 evidence extraction
+# ---------------------------------------------------------------------------
+
+_MINIMAL_MODULE_SWITCH = (
+    "<response>"
+    "<nrProductEnable>1</nrProductEnable>"
+    "<oneKeyCheckEnable>1</oneKeyCheckEnable>"
+    "<bestsignal_enable>0</bestsignal_enable>"
+    "<celllock_enabled>1</celllock_enabled>"
+    "<antenna_enabled>1</antenna_enabled>"
+    "<sa_enable>1</sa_enable>"
+    "</response>"
+)
+
+
+def _minimal_repo(tmp_path: Path) -> Path:
+    raw = tmp_path / "evidence" / "raw"
+    fixtures = tmp_path / "evidence" / "fixtures"
+    docs = tmp_path / "docs"
+    raw.mkdir(parents=True)
+    fixtures.mkdir(parents=True)
+    docs.mkdir(parents=True)
+    (raw / "_api_device_basic_information.xml").write_text(
+        "<response>"
+        "<productfamily>LTE</productfamily>"
+        "<classify>cpe</classify>"
+        "<devicename>H158-381</devicename>"
+        "<spreadname_en>5G CPE Pro 5</spreadname_en>"
+        "</response>",
+        encoding="utf-8",
+    )
+    (raw / "_api_net_current-plmn.xml").write_text(
+        "<response><Numeric>43211</Numeric><Rat>7</Rat></response>",
+        encoding="utf-8",
+    )
+    (raw / "_api_global_module-switch.xml").write_text(
+        _MINIMAL_MODULE_SWITCH, encoding="utf-8"
+    )
+    (docs / "PHASE1_FINDINGS.md").write_text(
+        "Prior context mentions n78 only.\n", encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_collect_device_facts_extracts_confirmed_identity_with_provenance():
+    evidence = collect_device_facts()
+
+    model = evidence.require_fact("device.model")
+    assert (model.value, model.status) == ("H158-381", "confirmed")
+    assert model.source_file == "evidence/raw/_api_device_basic_information.xml"
+    assert model.locator == "/response/devicename"
+    assert "corroborated" in model.explanation
+
+    assert evidence.require_fact("device.product_family").value == "LTE"
+    assert evidence.require_fact("device.classify").value == "cpe"
+    assert evidence.require_fact("device.product_name").value == "5G CPE Pro 5"
+    assert evidence.require_fact("device.classify").status == "confirmed"
+
+
+def test_collect_device_facts_extracts_plmn_and_rat_mode():
+    evidence = collect_device_facts()
+
+    plmn = evidence.require_fact("network.plmn")
+    rat = evidence.require_fact("network.rat_mode")
+    assert (plmn.value, plmn.status) == ("43211", "confirmed")
+    assert plmn.locator == "/response/Numeric"
+    assert (rat.value, rat.status) == ("7", "confirmed")
+    assert rat.locator == "/response/Rat"
+    assert "mode only" in rat.explanation
+
+
+def test_feature_flags_are_confirmed_but_never_band_evidence():
+    evidence = collect_device_facts()
+
+    flags = {
+        fact.name: fact
+        for fact in evidence.facts
+        if fact.name.startswith("feature.")
+    }
+    assert set(flags) == {
+        "feature.nrProductEnable",
+        "feature.oneKeyCheckEnable",
+        "feature.bestsignal_enable",
+        "feature.celllock_enabled",
+        "feature.antenna_enabled",
+        "feature.sa_enable",
+    }
+    assert flags["feature.nrProductEnable"].value == "1"
+    assert flags["feature.bestsignal_enable"].value == "0"
+    for fact in flags.values():
+        assert fact.status == "confirmed"
+        assert fact.source_file == "evidence/raw/_api_global_module-switch.xml"
+        assert "does not prove" in fact.explanation
+
+    confirmed_band_facts = [
+        fact
+        for fact in evidence.facts
+        if fact.name.startswith("band.") and fact.confirmed
+    ]
+    assert confirmed_band_facts == []
+
+
+def test_observed_n78_fact_points_to_a_repository_document():
+    evidence = collect_device_facts()
+
+    n78 = evidence.require_fact("band.nr.n78")
+    assert (n78.value, n78.status) == ("n78", "observed")
+    assert n78.source_file == "docs/PHASE1_FINDINGS.md"
+    assert n78.locator.startswith("line ")
+    assert "observed" in n78.explanation
+    assert "never promoted" in n78.explanation
+    assert n78.confirmed is False
+
+
+def test_gated_responses_are_gaps_not_band_evidence():
+    evidence = collect_device_facts()
+
+    gaps = {gap.name: gap for gap in evidence.gaps}
+    rat_mode_gap = gaps["data source: RAT mode configuration"]
+    assert rat_mode_gap.source_file == "evidence/raw/_api_net_net-mode.xml"
+    assert rat_mode_gap.locator == "/error/code"
+    assert "100003" in rat_mode_gap.explanation
+    assert rat_mode_gap.status == "unavailable"
+
+    monitoring_gap = gaps["data source: serving cell and monitoring status"]
+    assert "125002" in monitoring_gap.explanation
+
+    assert not any(
+        fact.name.startswith("band.")
+        and "net-mode" in fact.source_file
+        for fact in evidence.facts
+    )
+
+
+def test_missing_band_captures_are_reported_as_unavailable():
+    evidence = collect_device_facts()
+
+    gaps = {gap.name: gap for gap in evidence.gaps}
+    for name in (
+        "band capability: LTE band capability",
+        "band capability: NR band capability",
+        "band capability: generic band capability",
+        "band capability: LTE/NR band frequency list",
+    ):
+        assert name in gaps
+        assert gaps[name].status == "unavailable"
+        assert "no band is invented" in gaps[name].explanation
+
+
+def test_extracted_profile_keeps_confirmed_and_observed_separate():
+    test_profile = repository_device_profile()
+
+    assert test_profile.device_name == "H158-381"
+    assert test_profile.plmn == "43211"
+    assert test_profile.rat_mode == 7
+    assert test_profile.confirmed_slots == ()
+    assert [
+        (slot.rat, slot.band, slot.capability) for slot in test_profile.slots
+    ] == [("NR", "n78", "observed")]
+    assert "No confirmed band slot" in test_profile.notes
+    assert "never promoted" in test_profile.notes
+
+
+def test_engine_consumes_evidence_profile_without_ranking_observed_bands():
+    test_profile = repository_device_profile()
+
+    analysis = analyze(test_profile, [candidate("NR", "n78")])
+
+    assert analysis.ranking.ranked == ()
+    assert len(analysis.ranking.excluded) == 1
+    assert "only observed evidence" in analysis.ranking.excluded[0].reason
+    assert analysis.combinations.combinations == ()
+    assert any(
+        "no eligible confirmed NR secondary candidate" in reason
+        for reason in analysis.combinations.skipped_reasons
+    )
+
+
+def test_evidence_fact_requires_complete_provenance():
+    base = dict(
+        name="device.model",
+        value="H158-381",
+        status="confirmed",
+        source_file="evidence/raw/_api_device_basic_information.xml",
+        locator="/response/devicename",
+        explanation="Example.",
+    )
+    assert EvidenceFact(**base).confirmed is True
+
+    for field in ("name", "value", "locator", "explanation"):
+        broken = dict(base)
+        broken[field] = "   "
+        with pytest.raises(EvidenceValidationError):
+            EvidenceFact(**broken)  # type: ignore[arg-type]
+
+    for bad_source in ("C:/secret.xml", "../outside.xml"):
+        broken = dict(base)
+        broken["source_file"] = bad_source
+        with pytest.raises(EvidenceValidationError):
+            EvidenceFact(**broken)  # type: ignore[arg-type]
+
+    for bad_status in ("verified", "CURRENT", ""):
+        broken = dict(base)
+        broken["status"] = bad_status
+        with pytest.raises(EvidenceValidationError):
+            EvidenceFact(**broken)  # type: ignore[arg-type]
+
+
+def test_device_evidence_rejects_mislabeled_objects():
+    fact = collect_device_facts().require_fact("device.model")
+    with pytest.raises(EvidenceValidationError):
+        DeviceEvidence(facts=(fact, "not-a-fact"))  # type: ignore[arg-type]
+
+
+def test_contradictory_duplicate_facts_fail_closed():
+    evidence = collect_device_facts()
+    model = evidence.require_fact("device.model")
+    contradicted = DeviceEvidence(
+        facts=(
+            model,
+            EvidenceFact(
+                name="device.model",
+                value="H158-999",
+                status="confirmed",
+                source_file="evidence/fixtures/device_basic_information.xml",
+                locator="/response/DeviceName",
+                explanation="Conflicting fixture value.",
+            ),
+        )
+    )
+
+    with pytest.raises(EvidenceContradictionError):
+        build_profile_from_evidence(contradicted)
+
+
+def test_build_profile_rejects_conflicting_band_capabilities():
+    def band_fact(status: str) -> EvidenceFact:
+        return EvidenceFact(
+            name="band.nr.n78",
+            value="n78",
+            status=status,  # type: ignore[arg-type]
+            source_file="docs/PHASE1_FINDINGS.md",
+            locator="line 15",
+            explanation="Synthetic conflict.",
+        )
+
+    evidence = DeviceEvidence(
+        facts=(
+            EvidenceFact(
+                name="device.model",
+                value="H158-381",
+                status="confirmed",
+                source_file="evidence/raw/_api_device_basic_information.xml",
+                locator="/response/devicename",
+                explanation="Model.",
+            ),
+            band_fact("observed"),
+            band_fact("confirmed"),
+        )
+    )
+
+    with pytest.raises(EvidenceContradictionError):
+        build_profile_from_evidence(evidence)
+
+
+def test_build_profile_rejects_observed_identity_and_malformed_band_names():
+    observed_model = DeviceEvidence(
+        facts=(
+            EvidenceFact(
+                name="device.model",
+                value="H158-381",
+                status="observed",
+                source_file="docs/PHASE1_FINDINGS.md",
+                locator="line 4",
+                explanation="Historical only.",
+            ),
+        )
+    )
+    with pytest.raises(EvidenceValidationError):
+        build_profile_from_evidence(observed_model)
+
+    malformed_band = DeviceEvidence(
+        facts=(
+            EvidenceFact(
+                name="device.model",
+                value="H158-381",
+                status="confirmed",
+                source_file="evidence/raw/_api_device_basic_information.xml",
+                locator="/response/devicename",
+                explanation="Model.",
+            ),
+            EvidenceFact(
+                name="band.n78",
+                value="n78",
+                status="observed",
+                source_file="docs/PHASE1_FINDINGS.md",
+                locator="line 15",
+                explanation="Malformed fact name.",
+            ),
+        )
+    )
+    with pytest.raises(EvidenceValidationError):
+        build_profile_from_evidence(malformed_band)
+
+
+def test_missing_required_evidence_file_fails_closed(tmp_path):
+    root = _minimal_repo(tmp_path)
+    (root / "evidence/raw/_api_global_module-switch.xml").unlink()
+
+    with pytest.raises(EvidenceExtractionError, match="missing"):
+        collect_device_facts(root)
+
+
+def test_malformed_xml_evidence_fails_closed(tmp_path):
+    root = _minimal_repo(tmp_path)
+    (root / "evidence/raw/_api_device_basic_information.xml").write_text(
+        "<response><devicename>H158-381</response>", encoding="utf-8"
+    )
+
+    with pytest.raises(EvidenceExtractionError, match="malformed XML"):
+        collect_device_facts(root)
+
+
+def test_namespaced_xml_is_rejected(tmp_path):
+    root = _minimal_repo(tmp_path)
+    (root / "evidence/raw/_api_net_current-plmn.xml").write_text(
+        '<response xmlns="urn:example"><Numeric>43211</Numeric><Rat>7</Rat></response>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(EvidenceExtractionError, match="namespaced"):
+        collect_device_facts(root)
+
+
+def test_invalid_plmn_and_feature_flag_values_fail_closed(tmp_path):
+    root = _minimal_repo(tmp_path)
+    (root / "evidence/raw/_api_net_current-plmn.xml").write_text(
+        "<response><Numeric>123</Numeric><Rat>7</Rat></response>",
+        encoding="utf-8",
+    )
+    with pytest.raises(EvidenceExtractionError, match="invalid PLMN"):
+        collect_device_facts(root)
+
+    root = _minimal_repo(tmp_path / "second")
+    (root / "evidence/raw/_api_global_module-switch.xml").write_text(
+        _MINIMAL_MODULE_SWITCH.replace(
+            "<nrProductEnable>1</nrProductEnable>",
+            "<nrProductEnable>2</nrProductEnable>",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(EvidenceExtractionError, match="must be 0 or 1"):
+        collect_device_facts(root)
+
+
+def test_fixture_contradiction_is_rejected(tmp_path):
+    root = _minimal_repo(tmp_path)
+    (root / "evidence/fixtures/device_basic_information.xml").write_text(
+        "<response><DeviceName>H158-999</DeviceName></response>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(EvidenceContradictionError, match="device model"):
+        collect_device_facts(root)
+
+
+def test_fixture_corroboration_is_accepted(tmp_path):
+    root = _minimal_repo(tmp_path)
+    (root / "evidence/fixtures/device_basic_information.xml").write_text(
+        "<response>"
+        "<ProductFamily>LTE</ProductFamily>"
+        "<Classify>cpe</Classify>"
+        "<DeviceName>H158-381</DeviceName>"
+        "<SpreadName>5G CPE Pro 5</SpreadName>"
+        "</response>",
+        encoding="utf-8",
+    )
+    (root / "evidence/fixtures/current_plmn.xml").write_text(
+        "<response><Numeric>43211</Numeric><Rat>7</Rat></response>",
+        encoding="utf-8",
+    )
+
+    evidence = collect_device_facts(root)
+
+    assert evidence.require_fact("device.model").value == "H158-381"
+    assert evidence.require_fact("network.plmn").value == "43211"
+
+
+def test_evidence_sources_are_repository_relative():
+    for source in EVIDENCE_SOURCES:
+        path = Path(source)
+        assert not path.is_absolute()
+        assert ".." not in path.parts
+
+
+def test_evidence_module_has_no_network_imports():
+    source = Path(evidence_module.__file__).read_text(encoding="utf-8")
+
+    for forbidden in (
+        "import requests",
+        "import socket",
+        "import urllib",
+        "http.client",
+        "https://",
+        "http://",
+    ):
+        assert forbidden not in source
