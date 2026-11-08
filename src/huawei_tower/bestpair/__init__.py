@@ -44,6 +44,11 @@ from .evidence import (
     EvidenceValidationError,
     build_profile_from_evidence,
     collect_device_facts,
+    parse_basic_information,
+    parse_current_plmn,
+    parse_module_switch,
+    parse_operator_info,
+    parse_state_login,
     repository_device_profile,
 )
 
@@ -82,6 +87,11 @@ __all__ = [
     "evidence_minimal_profile",
     "generate_combinations",
     "normalize_metric",
+    "parse_basic_information",
+    "parse_current_plmn",
+    "parse_module_switch",
+    "parse_operator_info",
+    "parse_state_login",
     "rank_candidates",
     "repository_device_profile",
     "score_combination",

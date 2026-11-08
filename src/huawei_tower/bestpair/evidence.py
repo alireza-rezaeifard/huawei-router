@@ -49,6 +49,7 @@ _PLMN_RAW = f"{_RAW}/_api_net_current-plmn.xml"
 _PLMN_FIXTURE = f"{_FIXTURES}/current_plmn.xml"
 _MODULE_SWITCH_RAW = f"{_RAW}/_api_global_module-switch.xml"
 _OPERATOR_RAW = f"{_RAW}/_api_app_operatorinfo.xml"
+_STATE_LOGIN_RAW = f"{_RAW}/_api_user_state-login.xml"
 
 # Feature flags that are relevant to the product surface. They are recorded as
 # product toggles only; none of them is band-capability evidence.
@@ -61,6 +62,153 @@ _FEATURE_FLAGS: tuple[str, ...] = (
     "sa_enable",
 )
 
+# Closed schemas for the five successful captures. ``_TAGS`` is the complete set
+# of direct children observed in the sanitized capture; anything else is
+# rejected. ``_REQUIRED`` is the subset this module depends on for facts, so a
+# capture that omits descriptive extras is still accepted.
+_BASIC_INFORMATION_TAGS: tuple[str, ...] = (
+    "productfamily",
+    "classify",
+    "multimode",
+    "restore_default_status",
+    "sim_save_pin_enable",
+    "devicename",
+    "spreadname_en",
+    "spreadname_zh",
+)
+_BASIC_INFORMATION_REQUIRED: tuple[str, ...] = (
+    "productfamily",
+    "classify",
+    "devicename",
+    "spreadname_en",
+)
+
+_CURRENT_PLMN_TAGS: tuple[str, ...] = (
+    "State",
+    "FullName",
+    "ShortName",
+    "Numeric",
+    "Rat",
+    "Spn",
+)
+_CURRENT_PLMN_REQUIRED: tuple[str, ...] = ("Numeric", "Rat")
+
+_MODULE_SWITCH_TAGS: tuple[str, ...] = (
+    "ussd_enabled",
+    "ussdmenuswitch_enabled",
+    "bbou_enabled",
+    "sms_enabled",
+    "sdcard_enabled",
+    "wifi_enabled",
+    "statistic_enabled",
+    "help_enabled",
+    "stk_enabled",
+    "pb_enabled",
+    "wifioffload_enabled",
+    "cradle_enabled",
+    "multssid_enable",
+    "ipv6_enabled",
+    "monthly_volume_enabled",
+    "powersave_enabled",
+    "sntp_enabled",
+    "timeserverdisplay_enabled",
+    "sntpdisplay_enabled",
+    "dstdisplay_enabled",
+    "ntpdisplay_enable",
+    "encrypt_enabled",
+    "dataswitch_enabled",
+    "apn_retry_enabled",
+    "single_pdn_switch_enabled",
+    "poweroff_enabled",
+    "bridge_enabled",
+    "fw_macfilter_enabled",
+    "zonetime_enabled",
+    "diagnosis_enabled",
+    "pcp_enabled",
+    "localupdate_enabled",
+    "cbs_enabled",
+    "voip_enabled",
+    "qrcode_enabled",
+    "charger_enbaled",
+    "vpn_enabled",
+    "session_sms_enabled",
+    "bestsignal_enable",
+    "antenna_enabled",
+    "iptv_enabled",
+    "static_route_enabled",
+    "static_route6_enabled",
+    "cwmp_enabled",
+    "atp_enabled",
+    "loginusername_enable",
+    "autoreboot_enable",
+    "ipmacdisplay_enable",
+    "timemanualsetdisplay_enable",
+    "volte_enabled",
+    "get_pwd_enable",
+    "hostinfo_enable",
+    "timerule_enable",
+    "celllock_enabled",
+    "chrlog_enable",
+    "developermode_enable",
+    "syslogexport_clear_update_enable",
+    "gdpr_enabled",
+    "gdpr_version",
+    "hilink_enabled",
+    "hilink_switch",
+    "higame_enabled",
+    "higame_web_enabled",
+    "sa_privacy_notice",
+    "sa_enable",
+    "upnp_switch_without_hilink",
+    "websocket_enabled",
+    "hilink_online_update_enabled",
+    "web_feature_enabled",
+    "force_update_feature_enabled",
+    "statistic_day_remind_enable",
+    "safeinfo_enable",
+    "mbbsec_enable",
+    "ai_enable",
+    "hostnamechange_enabled",
+    "up_down_rate_enable",
+    "automatically_update_enabled",
+    "spreadname_enabled",
+    "lan_ipmodeswitch_enabled",
+    "china_region_enable",
+    "aclEnabled",
+    "staticdns_enabled",
+    "nrProductEnable",
+    "locationNominateEnable",
+    "ledCtrlEnable",
+    "oneKeyCheckEnable",
+    "bridgemode_onlineupdate_enable",
+    "externalProductFlag",
+    "urlmenudisplay_enable",
+    "roamdisplay_enable",
+    "dialupapn_enable",
+    "vendor_enable",
+    "ethspeedenable",
+)
+_MODULE_SWITCH_REQUIRED: tuple[str, ...] = _FEATURE_FLAGS
+
+_STATE_LOGIN_TAGS: tuple[str, ...] = (
+    "rsapadingtype",
+    "wifipwdsamewithwebpwd",
+    "extern_password_type",
+    "remainwaittime",
+    "State",
+    "history_login_flag",
+    "userlevel",
+    "username",
+    "password_type",
+    "firstlogin",
+    "lockstatus",
+    "accounts_number",
+)
+_STATE_LOGIN_REQUIRED: tuple[str, ...] = ("State",)
+_STATE_LOGIN_TEXT_TAGS: tuple[str, ...] = ("userlevel", "username")
+
+_OPERATOR_FIELDS: tuple[str, ...] = ("OperatorName",)
+
 # Gated / stub captures: (source file, human label).
 _GATED_SOURCES: tuple[tuple[str, str], ...] = (
     (f"{_RAW}/_api_device_information.xml", "firmware identity"),
@@ -69,6 +217,7 @@ _GATED_SOURCES: tuple[tuple[str, str], ...] = (
     (f"{_RAW}/_api_net_net-mode.xml", "RAT mode configuration"),
     (f"{_RAW}/_api_net_net-mode-list.xml", "RAT mode option list"),
     (f"{_RAW}/_api_config_global_config_xml.xml", "device configuration XML"),
+    (f"{_RAW}/_api_device_usb-tethering-switch.xml", "USB tethering switch"),
 )
 
 # Band-capability captures that do not exist locally. Their absence is itself
@@ -91,6 +240,7 @@ EVIDENCE_SOURCES: tuple[str, ...] = tuple(
             _PLMN_FIXTURE,
             _MODULE_SWITCH_RAW,
             _OPERATOR_RAW,
+            _STATE_LOGIN_RAW,
             _PHASE1_DOC,
             *(source for source, _ in _GATED_SOURCES),
             *(source for _, source in _BAND_CAPTURE_SOURCES),
@@ -382,28 +532,78 @@ def _validate_flag(name: str, value: str, relative_path: str) -> str:
     return value
 
 
-def collect_device_facts(repo_root: Path | str | None = None) -> DeviceEvidence:
-    """Extract provenance-tagged facts from sanitized local evidence only.
-
-    Required sources: the raw basic-information, current-PLMN and module-switch
-    XML captures plus ``docs/PHASE1_FINDINGS.md``. Fixtures and gated responses
-    are used for corroboration / gap reporting when present.
-    """
-    root_dir = _resolve_repo_root(repo_root)
-    facts: list[EvidenceFact] = []
-    gaps: list[EvidenceGap] = []
-
-    # -- Device identity ---------------------------------------------------
-    device_root = _load_xml(root_dir, _DEVICE_RAW)
-    assert device_root is not None
-    if getattr(device_root, "tag", None) == "error":
+def _require_integer(tag: str, value: str, relative_path: str) -> str:
+    if not re.fullmatch(r"-?\d+", value):
         raise EvidenceExtractionError(
-            f"{_DEVICE_RAW} contains a gated error response, not identity data"
+            f"invalid integer <{tag}> {value!r} in {relative_path}"
         )
-    device_name = _child_text(device_root, "devicename", _DEVICE_RAW)
-    product_family = _child_text(device_root, "productfamily", _DEVICE_RAW)
-    classify = _child_text(device_root, "classify", _DEVICE_RAW)
-    product_name = _child_text(device_root, "spreadname_en", _DEVICE_RAW)
+    return value
+
+
+def _require_response_root(
+    root: object,
+    relative_path: str,
+    allowed_tags: tuple[str, ...],
+) -> object:
+    """Enforce the closed child-element schema of one captured response.
+
+    ``_load_xml`` has already rejected namespaces and repeated elements. This
+    layer additionally rejects gated error bodies, unknown direct children and
+    unexpected attributes, so an unrecognised schema fails closed instead of
+    being silently ignored.
+    """
+    tag = getattr(root, "tag", None)
+    if tag == "error":
+        code = _error_code(root, relative_path)
+        raise EvidenceExtractionError(
+            f"gated error response code {code} in {relative_path}"
+        )
+    if tag != "response":
+        raise EvidenceExtractionError(
+            f"unexpected root element <{tag}> in {relative_path}"
+        )
+    if getattr(root, "attrib", None):
+        raise EvidenceExtractionError(
+            f"unexpected attributes on <response> in {relative_path}"
+        )
+
+    allowed = set(allowed_tags)
+    for child in root:
+        child_tag = getattr(child, "tag", None)
+        if child_tag not in allowed:
+            raise EvidenceExtractionError(
+                f"unexpected element <{child_tag}> in {relative_path}"
+            )
+        if getattr(child, "attrib", None):
+            raise EvidenceExtractionError(
+                f"unexpected attributes on <{child_tag}> in {relative_path}"
+            )
+    return root
+
+
+def _require_children(
+    root: object,
+    relative_path: str,
+    required_tags: tuple[str, ...],
+) -> None:
+    for tag in required_tags:
+        _child_text(root, tag, relative_path)
+
+
+def parse_basic_information(
+    repo_root: Path | str | None = None,
+) -> DeviceEvidence:
+    """Parse the captured basic-information response with a closed schema."""
+    root_dir = _resolve_repo_root(repo_root)
+    root = _load_xml(root_dir, _DEVICE_RAW)
+    assert root is not None
+    _require_response_root(root, _DEVICE_RAW, _BASIC_INFORMATION_TAGS)
+    _require_children(root, _DEVICE_RAW, _BASIC_INFORMATION_REQUIRED)
+
+    device_name = _child_text(root, "devicename", _DEVICE_RAW)
+    product_family = _child_text(root, "productfamily", _DEVICE_RAW)
+    classify = _child_text(root, "classify", _DEVICE_RAW)
+    product_name = _child_text(root, "spreadname_en", _DEVICE_RAW)
     assert (
         device_name is not None
         and product_family is not None
@@ -414,6 +614,285 @@ def collect_device_facts(repo_root: Path | str | None = None) -> DeviceEvidence:
         raise EvidenceExtractionError(
             f"implausible device name in {_DEVICE_RAW}: {device_name!r}"
         )
+
+    return DeviceEvidence(
+        facts=(
+            EvidenceFact(
+                name="device.model",
+                value=device_name,
+                status="confirmed",
+                source_file=_DEVICE_RAW,
+                locator="/response/devicename",
+                explanation=(
+                    "Device model read from the captured unauthenticated "
+                    "basic-information response; corroborated by the identity "
+                    "fixture when present."
+                ),
+            ),
+            EvidenceFact(
+                name="device.product_family",
+                value=product_family,
+                status="confirmed",
+                source_file=_DEVICE_RAW,
+                locator="/response/productfamily",
+                explanation=(
+                    "Product family reported by the device; descriptive "
+                    "identity only, not a band capability."
+                ),
+            ),
+            EvidenceFact(
+                name="device.classify",
+                value=classify,
+                status="confirmed",
+                source_file=_DEVICE_RAW,
+                locator="/response/classify",
+                explanation="Device class reported by the device.",
+            ),
+            EvidenceFact(
+                name="device.product_name",
+                value=product_name,
+                status="confirmed",
+                source_file=_DEVICE_RAW,
+                locator="/response/spreadname_en",
+                explanation="Marketing product name reported by the device.",
+            ),
+        )
+    )
+
+
+def parse_current_plmn(
+    repo_root: Path | str | None = None,
+) -> DeviceEvidence:
+    """Parse the captured current-PLMN response with a closed schema."""
+    root_dir = _resolve_repo_root(repo_root)
+    root = _load_xml(root_dir, _PLMN_RAW)
+    assert root is not None
+    _require_response_root(root, _PLMN_RAW, _CURRENT_PLMN_TAGS)
+    _require_children(root, _PLMN_RAW, _CURRENT_PLMN_REQUIRED)
+
+    numeric = _child_text(root, "Numeric", _PLMN_RAW)
+    rat = _child_text(root, "Rat", _PLMN_RAW)
+    assert numeric is not None and rat is not None
+    if not _PLMN_RE.fullmatch(numeric):
+        raise EvidenceExtractionError(f"invalid PLMN {numeric!r} in {_PLMN_RAW}")
+    if not rat.isdigit() or not 0 <= int(rat) <= 255:
+        raise EvidenceExtractionError(f"invalid RAT mode {rat!r} in {_PLMN_RAW}")
+
+    return DeviceEvidence(
+        facts=(
+            EvidenceFact(
+                name="network.plmn",
+                value=numeric,
+                status="confirmed",
+                source_file=_PLMN_RAW,
+                locator="/response/Numeric",
+                explanation=(
+                    "Serving PLMN only. It identifies the current network, "
+                    "not a band capability."
+                ),
+            ),
+            EvidenceFact(
+                name="network.rat_mode",
+                value=rat,
+                status="confirmed",
+                source_file=_PLMN_RAW,
+                locator="/response/Rat",
+                explanation=(
+                    "Rat 7 is the LTE+NR NSA mode on Huawei MBB firmware. It "
+                    "proves the mode only, never a specific band combination."
+                ),
+            ),
+        )
+    )
+
+
+def parse_module_switch(
+    repo_root: Path | str | None = None,
+) -> DeviceEvidence:
+    """Parse the captured module-switch response with a closed schema."""
+    root_dir = _resolve_repo_root(repo_root)
+    root = _load_xml(root_dir, _MODULE_SWITCH_RAW)
+    assert root is not None
+    _require_response_root(root, _MODULE_SWITCH_RAW, _MODULE_SWITCH_TAGS)
+    _require_children(root, _MODULE_SWITCH_RAW, _MODULE_SWITCH_REQUIRED)
+
+    facts: list[EvidenceFact] = []
+    for flag in _FEATURE_FLAGS:
+        raw_value = _child_text(root, flag, _MODULE_SWITCH_RAW)
+        assert raw_value is not None
+        value = _validate_flag(flag, raw_value, _MODULE_SWITCH_RAW)
+        facts.append(
+            EvidenceFact(
+                name=f"feature.{flag}",
+                value=value,
+                status="confirmed",
+                source_file=_MODULE_SWITCH_RAW,
+                locator=f"/response/{flag}",
+                explanation=(
+                    "Product feature toggle. It does not prove any supported "
+                    "LTE or NR band and is not used to gate ranking."
+                ),
+            )
+        )
+    return DeviceEvidence(facts=tuple(facts))
+
+
+def parse_state_login(
+    repo_root: Path | str | None = None,
+) -> DeviceEvidence:
+    """Parse the captured state-login response with a closed schema.
+
+    Empty optional values (for example ``username`` when the capture was taken
+    while logged out) are reported as explicit gaps, never as invented text.
+    """
+    root_dir = _resolve_repo_root(repo_root)
+    root = _load_xml(root_dir, _STATE_LOGIN_RAW)
+    assert root is not None
+    _require_response_root(root, _STATE_LOGIN_RAW, _STATE_LOGIN_TAGS)
+
+    facts: list[EvidenceFact] = []
+    gaps: list[EvidenceGap] = []
+    for tag in _STATE_LOGIN_TAGS:
+        required = tag in _STATE_LOGIN_REQUIRED
+        value = _child_text(root, tag, _STATE_LOGIN_RAW, required=required)
+        if value is None or value == "":
+            gaps.append(
+                EvidenceGap(
+                    name=f"login.{tag}",
+                    source_file=_STATE_LOGIN_RAW,
+                    locator=f"/response/{tag}",
+                    explanation=(
+                        f"The captured state-login response has no usable "
+                        f"<{tag}> value; no value is invented."
+                    ),
+                )
+            )
+            continue
+        if tag not in _STATE_LOGIN_TEXT_TAGS:
+            _require_integer(tag, value, _STATE_LOGIN_RAW)
+        facts.append(
+            EvidenceFact(
+                name=f"login.{tag}",
+                value=value,
+                status="confirmed",
+                source_file=_STATE_LOGIN_RAW,
+                locator=f"/response/{tag}",
+                explanation=(
+                    "Login-state metadata reported by the captured state-login "
+                    "response; it is not a band or RF capability."
+                ),
+            )
+        )
+    return DeviceEvidence(facts=tuple(facts), gaps=tuple(gaps))
+
+
+def parse_operator_info(
+    repo_root: Path | str | None = None,
+) -> DeviceEvidence:
+    """Parse the captured operator-info JSON with a closed field set."""
+    root_dir = _resolve_repo_root(repo_root)
+    path = root_dir / _OPERATOR_RAW
+    if not path.is_file():
+        return DeviceEvidence(
+            facts=(),
+            gaps=(
+                EvidenceGap(
+                    name="operator display name",
+                    source_file=_OPERATOR_RAW,
+                    locator="(file not present)",
+                    explanation="No operator-info capture is available.",
+                ),
+            ),
+        )
+
+    text = _read_text(root_dir, _OPERATOR_RAW)
+    start = text.find("{")
+    if start < 0:
+        raise EvidenceExtractionError(f"no JSON payload found in {_OPERATOR_RAW}")
+    try:
+        payload = json.loads(text[start:])
+    except json.JSONDecodeError as exc:
+        raise EvidenceExtractionError(
+            f"malformed JSON evidence in {_OPERATOR_RAW}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise EvidenceExtractionError(
+            f"unexpected JSON payload in {_OPERATOR_RAW}"
+        )
+
+    unexpected = sorted(set(payload) - set(_OPERATOR_FIELDS))
+    if unexpected:
+        raise EvidenceExtractionError(
+            f"unexpected JSON field(s) {', '.join(unexpected)} in {_OPERATOR_RAW}"
+        )
+    if "OperatorName" not in payload:
+        raise EvidenceExtractionError(
+            f"missing OperatorName field in {_OPERATOR_RAW}"
+        )
+    operator_name = payload["OperatorName"]
+    if not isinstance(operator_name, str):
+        raise EvidenceExtractionError(
+            f"missing OperatorName field in {_OPERATOR_RAW}"
+        )
+
+    if operator_name.strip():
+        return DeviceEvidence(
+            facts=(
+                EvidenceFact(
+                    name="network.operator_name",
+                    value=operator_name.strip(),
+                    status="observed",
+                    source_file=_OPERATOR_RAW,
+                    locator="/OperatorName",
+                    explanation=(
+                        "Operator label reported by an app endpoint; not "
+                        "independently verified and not a capability."
+                    ),
+                ),
+            )
+        )
+    return DeviceEvidence(
+        facts=(),
+        gaps=(
+            EvidenceGap(
+                name="operator display name",
+                source_file=_OPERATOR_RAW,
+                locator="/OperatorName",
+                explanation=(
+                    "The sanitized capture contains an empty OperatorName, "
+                    "so the display name is unavailable."
+                ),
+            ),
+        ),
+    )
+
+
+def _fact_value(evidence: DeviceEvidence, name: str, source_file: str) -> str:
+    fact = evidence.fact(name)
+    if fact is None:
+        raise EvidenceExtractionError(
+            f"{source_file} did not produce the required fact {name!r}"
+        )
+    return fact.value
+
+
+def collect_device_facts(repo_root: Path | str | None = None) -> DeviceEvidence:
+    """Extract provenance-tagged facts from sanitized local evidence only.
+
+    Required sources: the raw basic-information, current-PLMN and module-switch
+    XML captures plus ``docs/PHASE1_FINDINGS.md``. Fixtures, login state and
+    gated responses are used for corroboration / gap reporting when present.
+    """
+    root_dir = _resolve_repo_root(repo_root)
+    facts: list[EvidenceFact] = []
+    gaps: list[EvidenceGap] = []
+
+    # -- Device identity ---------------------------------------------------
+    identity = parse_basic_information(root_dir)
+    device_name = _fact_value(identity, "device.model", _DEVICE_RAW)
+    product_family = _fact_value(identity, "device.product_family", _DEVICE_RAW)
+    classify = _fact_value(identity, "device.classify", _DEVICE_RAW)
+    product_name = _fact_value(identity, "device.product_name", _DEVICE_RAW)
 
     fixture_root = _load_xml(root_dir, _DEVICE_FIXTURE, required=False)
     if fixture_root is not None:
@@ -461,69 +940,12 @@ def collect_device_facts(repo_root: Path | str | None = None) -> DeviceEvidence:
                 ),
             )
         )
-
-    facts.extend(
-        (
-            EvidenceFact(
-                name="device.model",
-                value=device_name,
-                status="confirmed",
-                source_file=_DEVICE_RAW,
-                locator="/response/devicename",
-                explanation=(
-                    "Device model read from the captured unauthenticated "
-                    "basic-information response; corroborated by the identity "
-                    "fixture when present."
-                ),
-            ),
-            EvidenceFact(
-                name="device.product_family",
-                value=product_family,
-                status="confirmed",
-                source_file=_DEVICE_RAW,
-                locator="/response/productfamily",
-                explanation=(
-                    "Product family reported by the device; descriptive "
-                    "identity only, not a band capability."
-                ),
-            ),
-            EvidenceFact(
-                name="device.classify",
-                value=classify,
-                status="confirmed",
-                source_file=_DEVICE_RAW,
-                locator="/response/classify",
-                explanation="Device class reported by the device.",
-            ),
-            EvidenceFact(
-                name="device.product_name",
-                value=product_name,
-                status="confirmed",
-                source_file=_DEVICE_RAW,
-                locator="/response/spreadname_en",
-                explanation="Marketing product name reported by the device.",
-            ),
-        )
-    )
+    facts.extend(identity.facts)
 
     # -- Network identity --------------------------------------------------
-    plmn_root = _load_xml(root_dir, _PLMN_RAW)
-    assert plmn_root is not None
-    if getattr(plmn_root, "tag", None) == "error":
-        raise EvidenceExtractionError(
-            f"{_PLMN_RAW} contains a gated error response, not PLMN data"
-        )
-    numeric = _child_text(plmn_root, "Numeric", _PLMN_RAW)
-    rat = _child_text(plmn_root, "Rat", _PLMN_RAW)
-    assert numeric is not None and rat is not None
-    if not _PLMN_RE.fullmatch(numeric):
-        raise EvidenceExtractionError(
-            f"invalid PLMN {numeric!r} in {_PLMN_RAW}"
-        )
-    if not rat.isdigit() or not 0 <= int(rat) <= 255:
-        raise EvidenceExtractionError(
-            f"invalid RAT mode {rat!r} in {_PLMN_RAW}"
-        )
+    plmn_evidence = parse_current_plmn(root_dir)
+    numeric = _fact_value(plmn_evidence, "network.plmn", _PLMN_RAW)
+    rat = _fact_value(plmn_evidence, "network.rat_mode", _PLMN_RAW)
 
     plmn_fixture = _load_xml(root_dir, _PLMN_FIXTURE, required=False)
     if plmn_fixture is not None:
@@ -557,58 +979,10 @@ def collect_device_facts(repo_root: Path | str | None = None) -> DeviceEvidence:
                 ),
             )
         )
-
-    facts.extend(
-        (
-            EvidenceFact(
-                name="network.plmn",
-                value=numeric,
-                status="confirmed",
-                source_file=_PLMN_RAW,
-                locator="/response/Numeric",
-                explanation=(
-                    "Serving PLMN only. It identifies the current network, "
-                    "not a band capability."
-                ),
-            ),
-            EvidenceFact(
-                name="network.rat_mode",
-                value=rat,
-                status="confirmed",
-                source_file=_PLMN_RAW,
-                locator="/response/Rat",
-                explanation=(
-                    "Rat 7 is the LTE+NR NSA mode on Huawei MBB firmware. It "
-                    "proves the mode only, never a specific band combination."
-                ),
-            ),
-        )
-    )
+    facts.extend(plmn_evidence.facts)
 
     # -- Product feature flags --------------------------------------------
-    switch_root = _load_xml(root_dir, _MODULE_SWITCH_RAW)
-    assert switch_root is not None
-    if getattr(switch_root, "tag", None) == "error":
-        raise EvidenceExtractionError(
-            f"{_MODULE_SWITCH_RAW} contains a gated error response, not feature flags"
-        )
-    for flag in _FEATURE_FLAGS:
-        raw_value = _child_text(switch_root, flag, _MODULE_SWITCH_RAW)
-        assert raw_value is not None
-        value = _validate_flag(flag, raw_value, _MODULE_SWITCH_RAW)
-        facts.append(
-            EvidenceFact(
-                name=f"feature.{flag}",
-                value=value,
-                status="confirmed",
-                source_file=_MODULE_SWITCH_RAW,
-                locator=f"/response/{flag}",
-                explanation=(
-                    "Product feature toggle. It does not prove any supported "
-                    "LTE or NR band and is not used to gate ranking."
-                ),
-            )
-        )
+    facts.extend(parse_module_switch(root_dir).facts)
 
     # -- Historical context documented in the repository -----------------
     doc_text = _read_text(root_dir, _PHASE1_DOC)
@@ -644,62 +1018,25 @@ def collect_device_facts(repo_root: Path | str | None = None) -> DeviceEvidence:
         )
 
     # -- Operator label (JSON stub) --------------------------------------
-    operator_path = root_dir / _OPERATOR_RAW
-    if operator_path.is_file():
-        operator_text = _read_text(root_dir, _OPERATOR_RAW)
-        start = operator_text.find("{")
-        if start < 0:
-            raise EvidenceExtractionError(
-                f"no JSON payload found in {_OPERATOR_RAW}"
-            )
-        try:
-            payload = json.loads(operator_text[start:])
-        except json.JSONDecodeError as exc:
-            raise EvidenceExtractionError(
-                f"malformed JSON evidence in {_OPERATOR_RAW}"
-            ) from exc
-        if not isinstance(payload, dict):
-            raise EvidenceExtractionError(
-                f"unexpected JSON payload in {_OPERATOR_RAW}"
-            )
-        operator_name = payload.get("OperatorName")
-        if not isinstance(operator_name, str):
-            raise EvidenceExtractionError(
-                f"missing OperatorName field in {_OPERATOR_RAW}"
-            )
-        if operator_name.strip():
-            facts.append(
-                EvidenceFact(
-                    name="network.operator_name",
-                    value=operator_name.strip(),
-                    status="observed",
-                    source_file=_OPERATOR_RAW,
-                    locator="/OperatorName",
-                    explanation=(
-                        "Operator label reported by an app endpoint; not "
-                        "independently verified and not a capability."
-                    ),
-                )
-            )
-        else:
-            gaps.append(
-                EvidenceGap(
-                    name="operator display name",
-                    source_file=_OPERATOR_RAW,
-                    locator="/OperatorName",
-                    explanation=(
-                        "The sanitized capture contains an empty OperatorName, "
-                        "so the display name is unavailable."
-                    ),
-                )
-            )
+    operator_evidence = parse_operator_info(root_dir)
+    facts.extend(operator_evidence.facts)
+    gaps.extend(operator_evidence.gaps)
+
+    # -- Login-state metadata --------------------------------------------
+    if (root_dir / _STATE_LOGIN_RAW).is_file():
+        login_evidence = parse_state_login(root_dir)
+        facts.extend(login_evidence.facts)
+        gaps.extend(login_evidence.gaps)
     else:
         gaps.append(
             EvidenceGap(
-                name="operator display name",
-                source_file=_OPERATOR_RAW,
+                name="login state metadata",
+                source_file=_STATE_LOGIN_RAW,
                 locator="(file not present)",
-                explanation="No operator-info capture is available.",
+                explanation=(
+                    "No local state-login capture exists, so login-state "
+                    "metadata is unavailable and no value is invented."
+                ),
             )
         )
 
